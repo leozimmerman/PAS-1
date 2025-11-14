@@ -1,0 +1,83 @@
+# ===================================
+# JUCE / C++ Project .gitignore
+# ===================================
+
+# --- Build and intermediate files ---
+Build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+*.make
+Makefile
+*.cmake
+*.ninja
+*.ninja_deps
+*.ninja_log
+*.obj
+*.o
+*.a
+*.so
+*.dll
+*.lib
+*.exp
+*.pdq
+*.idb
+*.exe
+*.app/
+*.dSYM/
+*.user
+*.VC.db
+*.VC.opendb
+
+# --- IDE / Editor files ---
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+*.iml
+
+# --- OS generated files ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# --- JUCE-specific ---
+*.jucer.lock
+*.juceAppConfig.h
+*.juce_PIPConfig.h
+*.juce_module_info
+JuceLibraryCode/
+JUCELibraryCode/
+JUCE/modules/
+modules/
+
+# --- Build artifacts ---
+bin/
+build/
+out/
+Release/
+Debug/
+x64/
+x86/
+DerivedData/
+
+# --- Logs and temporary ---
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+
+# --- CMake presets / cache ---
+CMakeUserPresets.json
+CMakePresets.json
+
+# --- Other ---
+*.orig
+*.patch
+*.diff
+*.zip
+*.tar
+*.gz
+*.7z
