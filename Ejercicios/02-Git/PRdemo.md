@@ -4,3 +4,4 @@
 
 Aca Juan haciendo un cambios
 
+🫣 rm . -r -f
