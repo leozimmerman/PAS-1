@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <cmath>
 
 //==============================================================================
 MainComponent::MainComponent()
@@ -115,6 +116,11 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
         lastRms.insertMultiple (0, 0.0f, numOutChans);
         smoothedRms.insertMultiple (0, 0.0f, numOutChans);
     }
+
+    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    envelopeState = 0.0f;
+    lastPeak = 0.0f;
+    lastEnvelope = 0.0f;
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
@@ -128,6 +134,11 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
         for (int c = 0; c < smoothedRms.size(); ++c)
             smoothedRms.set (c, 0.0f);
         lastRms = smoothedRms;
+
+        const juce::SpinLock::ScopedLockType sl2 (audioFeatLock);
+        lastPeak = 0.0f;
+        lastEnvelope = 0.0f;
+        envelopeState = 0.0f;
         return;
     }
 
@@ -173,6 +184,33 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
             smoothedRms.set (ch, sm);
             lastRms.set (ch, sm);
         }
+    }
+
+    const double tau = std::max (0.0001, (double) envelopeTauSec);
+    const double alpha = std::exp (-1.0 / (tau * currentSampleRate)); // alpha in y[n] = alpha*y[n-1] + (1-alpha)*x[n]
+    float peak = 0.0f;
+    float localEnv = envelopeState;
+
+    // Iterate per-sample and update mono peak/envelope
+    for (int i = 0; i < n; ++i)
+    {
+        float mono = 0.0f;
+        for (int ch = 0; ch < numChans; ++ch)
+            mono += buffer->getReadPointer (ch, start)[i];
+        mono /= (float) numChans;
+
+        const float absS = std::abs (mono);
+        if (absS > peak) peak = absS;
+
+        // one-pole smoothing on absolute signal
+        localEnv = (float) (alpha * localEnv + (1.0 - alpha) * absS);
+    }
+
+    {
+        const juce::SpinLock::ScopedLockType sl2 (audioFeatLock);
+        envelopeState = localEnv;
+        lastPeak = peak;
+        lastEnvelope = localEnv;
     }
 }
 
@@ -323,8 +361,9 @@ void MainComponent::timerCallback()
     /// Send OSC (from message thread) if enabled
     if (oscEnableToggle.getToggleState() && oscConnected)
     {
-        auto values = getLatestRms();
-        sendRmsOverOsc (values);
+        // Send combined RMS + peak + envelope in a single OSC message:
+        // [ oscAddress ] <rms_ch0> <rms_ch1> ... <peak> <envelope>
+        sendAudioFeaturesOverOsc();
     }
 }
 
@@ -411,14 +450,48 @@ void MainComponent::sendRmsOverOsc (const juce::Array<float>& values)
     if (! oscConnected)
         return;
 
-    // Build message: /address <float ch0> <float ch1> ...
-    juce::OSCMessage msg (oscAddress.isEmpty() ? "/rms" : oscAddress);
+    // Use clearer address: base/address + "/rms"
+    juce::String addr = oscAddress.isEmpty() ? "/audio/rms" : (oscAddress + "/rms");
+    juce::OSCMessage msg (addr);
 
     for (auto v : values)
         msg.addFloat32 (juce::jlimit (0.0f, 1.0f, v));
 
     // Best-effort send; ignore failures here
     (void) oscSender.send (msg);
+}
+
+// New: send RMS + peak + envelope in one message (message thread)
+void MainComponent::sendAudioFeaturesOverOsc()
+{
+    if (!oscConnected)
+        return;
+
+    auto rms = getLatestRms();
+
+    float peak = 0.0f;
+    float env  = 0.0f;
+    {
+        const juce::SpinLock::ScopedLockType sl (audioFeatLock);
+        peak = lastPeak;
+        env  = lastEnvelope;
+    }
+
+    juce::String rmsAddr = oscAddress.isEmpty() ? "/audio/rms" : (oscAddress + "/rms");
+    juce::OSCMessage rmsMsg (rmsAddr);
+    for (auto v : rms)
+        rmsMsg.addFloat32 (juce::jlimit (0.0f, 1.0f, v));
+    (void) oscSender.send (rmsMsg);
+
+    juce::String peakAddr = oscAddress.isEmpty() ? "/audio/peak" : (oscAddress + "/peak");
+    juce::OSCMessage peakMsg (peakAddr);
+    peakMsg.addFloat32 (juce::jlimit (0.0f, 1.0f, peak));
+    (void) oscSender.send (peakMsg);
+
+    juce::String envAddr = oscAddress.isEmpty() ? "/audio/envelope" : (oscAddress + "/envelope");
+    juce::OSCMessage envMsg (envAddr);
+    envMsg.addFloat32 (juce::jlimit (0.0f, 1.0f, env));
+    (void) oscSender.send (envMsg);
 }
 
 void MainComponent::reconnectOscIfEnabled()
@@ -429,7 +502,7 @@ void MainComponent::reconnectOscIfEnabled()
         oscPort = portEdit.getText().getIntValue();
         oscAddress = addrEdit.getText().trim();
         if (oscAddress.isEmpty())
-            oscAddress = "/rms";
+            oscAddress = "/audio";
 
         updateOscConnection();
     }
@@ -444,7 +517,7 @@ void MainComponent::handleOscEnableToggleClicked()
         oscPort = portEdit.getText().getIntValue();
         oscAddress = addrEdit.getText().trim();
         if (oscAddress.isEmpty()) // default address value
-            oscAddress = "/rms";
+            oscAddress = "/audio";
 
         updateOscConnection();
 

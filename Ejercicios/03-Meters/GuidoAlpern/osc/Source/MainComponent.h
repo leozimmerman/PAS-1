@@ -57,7 +57,7 @@ private:
     juce::OSCSender oscSender;
     juce::String oscHost { "127.0.0.1" };
     int oscPort { 9000 };
-    juce::String oscAddress { "/rms" };
+    juce::String oscAddress { "/audio" }; // base address used to build explicit message names
     bool oscConnected { false };
 
     // Button::Listener
@@ -75,12 +75,23 @@ private:
     void reconnectOscIfEnabled();
     void handleOscEnableToggleClicked(); // extracted handler
 
+    // New: send combined audio features over OSC (RMS + peak + envelope)
+    void sendAudioFeaturesOverOsc();
+
     // Metering: latest RMS per channel (smoothed), protected by a lock for cross-thread access
     mutable juce::SpinLock rmsLock;
     juce::Array<float> lastRms;
     juce::Array<float> smoothedRms;
     float rmsSmoothingAlpha = 0.2f;
     
+    // New: simple audio features (peak + envelope) with a separate lock
+    mutable juce::SpinLock audioFeatLock;
+    float lastPeak { 0.0f };        // last block peak (0..1)
+    float lastEnvelope { 0.0f };    // envelope follower state (0..1)
+    float envelopeState { 0.0f };   // running state on audio thread
+    float envelopeTauSec { 0.01f }; // time constant in seconds
+    double currentSampleRate { 44100.0 };
+
     // Timer: drive UI meter updates
     void timerCallback() override;
 

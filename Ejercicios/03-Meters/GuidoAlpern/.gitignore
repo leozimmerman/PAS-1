@@ -1,6 +1,7 @@
 JuceLibraryCode/
 Builds/
 
+Main.cpp
 !src/
 !src/**/
 !src/**/*
