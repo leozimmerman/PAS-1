@@ -1,0 +1,578 @@
+#include "MainComponent.h"
+#include <cmath>
+
+//==============================================================================
+MainComponent::MainComponent()
+{
+    setSize(800, 600);
+
+    setupGuiComponents();
+    setupAudioPlayer();
+}
+
+MainComponent::~MainComponent()
+{
+    // Stop UI timer first to avoid repaint after teardown
+    stopTimer();
+
+    // This shuts down the audio device and clears the audio source.
+    shutdownAudio();
+
+    // Ensure transport is stopped and reader released before destruction
+    transport.stop();
+    transport.setSource(nullptr);
+    readerSource.reset();
+
+    disconnectOsc();
+}
+
+void MainComponent::setupGuiComponents()
+{
+    addAndMakeVisible(loadButton);
+    addAndMakeVisible(playButton);
+    addAndMakeVisible(stopButton);
+
+    smoothingLabel.setText("Smoothing", juce::dontSendNotification);
+    smoothingLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(smoothingLabel);
+
+    smoothingSlider.setRange(0.0, 1.0, 0.001);
+
+    // Invert mapping: slider shows "smoothing amount", alpha is "snappiness".
+    smoothingSlider.setValue(rmsSmoothingAlpha, juce::dontSendNotification);
+    smoothingSlider.setTextValueSuffix("");
+    smoothingSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    smoothingSlider.onValueChange = [this]
+        {
+            const double sliderVal = smoothingSlider.getValue();
+            rmsSmoothingAlpha = (float)(sliderVal);
+        };
+    addAndMakeVisible(smoothingSlider);
+
+    loadButton.onClick = [this] { chooseAndLoadFile(); };
+    playButton.onClick = [this]
+        {
+            const double len = transport.getLengthInSeconds();
+            if (len > 0.0 && transport.getCurrentPosition() >= len - 1e-6)
+                transport.setPosition(0.0);
+
+            transport.start();
+            setButtonsEnabledState();
+        };
+    stopButton.onClick = [this]
+        {
+            transport.stop();
+            setButtonsEnabledState();
+        };
+
+    // Minimal OSC GUI
+    hostLabel.setJustificationType(juce::Justification::centredLeft);
+    portLabel.setJustificationType(juce::Justification::centredLeft);
+    addrLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(hostLabel);
+    addAndMakeVisible(portLabel);
+    addAndMakeVisible(addrLabel);
+
+    hostEdit.setText(oscHost, juce::dontSendNotification);
+    portEdit.setInputRestrictions(0, "0123456789");
+    portEdit.setText(juce::String(oscPort), juce::dontSendNotification);
+    addrEdit.setText(oscAddress, juce::dontSendNotification);
+    addAndMakeVisible(hostEdit);
+    addAndMakeVisible(portEdit);
+    addAndMakeVisible(addrEdit);
+
+    oscEnableToggle.onClick = [this] { handleOscEnableToggleClicked(); };
+    addAndMakeVisible(oscEnableToggle);
+
+    // Update connection if user edits fields while enabled
+    hostEdit.onFocusLost = [this] { reconnectOscIfEnabled(); };
+    portEdit.onFocusLost = [this] { reconnectOscIfEnabled(); };
+    addrEdit.onFocusLost = [this] { reconnectOscIfEnabled(); };
+
+    setButtonsEnabledState();
+}
+
+void MainComponent::setupAudioPlayer()
+{
+    formatManager.registerBasicFormats();
+    setAudioChannels(0, 2);
+}
+
+//==============================================================================
+void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+    juce::ignoreUnused(samplesPerBlockExpected);
+    transport.prepareToPlay(samplesPerBlockExpected, sampleRate);
+
+    // Prepare RMS arrays to current output channels (from device)
+    int numOutChans = 1;
+    if (auto* dev = deviceManager.getCurrentAudioDevice())
+        numOutChans = juce::jmax(1, dev->getActiveOutputChannels().countNumberOfSetBits());
+
+    {
+        const juce::SpinLock::ScopedLockType sl(rmsLock);
+        lastRms.clearQuick();
+        smoothedRms.clearQuick();
+        lastRms.insertMultiple(0, 0.0f, numOutChans);
+        smoothedRms.insertMultiple(0, 0.0f, numOutChans);
+    }
+
+    currentSampleRate = sampleRate > 0.0 ? sampleRate : 44100.0;
+    envelopeState = 0.0f;
+    lastPeak = 0.0f;
+    lastEnvelope = 0.0f;
+}
+
+void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    // 1) All zero if no source ------------------
+    if (readerSource == nullptr)
+    {
+        bufferToFill.clearActiveBufferRegion();
+        // Also reset RMS to zero when no source
+        const juce::SpinLock::ScopedLockType sl(rmsLock);
+        for (int c = 0; c < smoothedRms.size(); ++c)
+            smoothedRms.set(c, 0.0f);
+        lastRms = smoothedRms;
+
+        const juce::SpinLock::ScopedLockType sl2(audioFeatLock);
+        lastPeak = 0.0f;
+        lastEnvelope = 0.0f;
+        envelopeState = 0.0f;
+        return;
+    }
+
+    transport.getNextAudioBlock(bufferToFill);
+
+    // 2) Get audio buffer data -------------------
+    auto* buffer = bufferToFill.buffer;
+    if (buffer == nullptr || bufferToFill.numSamples <= 0)
+        return;
+
+    // 3) Calculate instant RMS
+    juce::Array<float> instantRms;
+    calculateInstantRms(buffer, bufferToFill.startSample, bufferToFill.numSamples, instantRms);
+
+    // 4) Smooth RMS values
+    smoothRmsValues(instantRms);
+
+    // 5) Calculate peak
+    calculatePeak(buffer, bufferToFill.startSample, bufferToFill.numSamples);
+
+    // 6) Calculate envelope
+    calculateEnvelope(buffer, bufferToFill.startSample, bufferToFill.numSamples);
+}
+
+void MainComponent::releaseResources()
+{
+    transport.releaseResources();
+}
+
+//==============================================================================
+// Audio feature calculation functions
+void MainComponent::calculateInstantRms(const juce::AudioBuffer<float>* buffer,
+    int startSample,
+    int numSamples,
+    juce::Array<float>& instantRms)
+{
+    if (buffer == nullptr || numSamples <= 0)
+        return;
+
+    const int numChans = buffer->getNumChannels();
+    instantRms.clearQuick();
+    instantRms.insertMultiple(0, 0.0f, numChans);
+
+    for (int ch = 0; ch < numChans; ++ch)
+    {
+        const float* data = buffer->getReadPointer(ch, startSample);
+
+        double sumSquares = 0.0;
+        for (int i = 0; i < numSamples; ++i)
+        {
+            const float s = data[i];
+            sumSquares += (double)s * (double)s;
+        }
+        auto sumSquaresDiv = sumSquares / (double)numSamples;
+        const float rms = std::sqrt((float)sumSquaresDiv);
+        instantRms.set(ch, rms);
+    }
+}
+
+void MainComponent::smoothRmsValues(const juce::Array<float>& instantRms)
+{
+    const juce::SpinLock::ScopedLockType sl(rmsLock);
+    const float a = juce::jlimit(0.0f, 1.0f, rmsSmoothingAlpha);
+    const float b = 1.0f - a;
+
+    for (int ch = 0; ch < smoothedRms.size(); ++ch)
+    {
+        const float sm = b * instantRms[ch] + a * smoothedRms[ch];
+        smoothedRms.set(ch, sm);
+        lastRms.set(ch, sm);
+    }
+}
+
+void MainComponent::calculatePeak(const juce::AudioBuffer<float>* buffer,
+    int startSample,
+    int numSamples)
+{
+    if (buffer == nullptr || numSamples <= 0)
+        return;
+
+    const int numChans = buffer->getNumChannels();
+    float peak = 0.0f;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float mono = 0.0f;
+        for (int ch = 0; ch < numChans; ++ch)
+            mono += buffer->getReadPointer(ch, startSample)[i];
+        mono /= (float)numChans;
+
+        const float absS = std::abs(mono);
+        if (absS > peak) peak = absS;
+    }
+
+    const juce::SpinLock::ScopedLockType sl(audioFeatLock);
+    lastPeak = peak;
+}
+
+void MainComponent::calculateEnvelope(const juce::AudioBuffer<float>* buffer,
+    int startSample,
+    int numSamples)
+{
+    if (buffer == nullptr || numSamples <= 0)
+        return;
+
+    const int numChans = buffer->getNumChannels();
+    const double tau = std::max(0.0001, (double)envelopeTauSec);
+    const double alpha = std::exp(-1.0 / (tau * currentSampleRate));
+
+    float localEnv = envelopeState;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float mono = 0.0f;
+        for (int ch = 0; ch < numChans; ++ch)
+            mono += buffer->getReadPointer(ch, startSample)[i];
+        mono /= (float)numChans;
+
+        const float absS = std::abs(mono);
+        localEnv = (float)(alpha * localEnv + (1.0 - alpha) * absS);
+    }
+
+    const juce::SpinLock::ScopedLockType sl(audioFeatLock);
+    envelopeState = localEnv;
+    lastEnvelope = localEnv;
+}
+
+//==============================================================================
+void MainComponent::paint(juce::Graphics& g)
+{
+    // (Our component is opaque, so we must completely fill the background with a solid colour)
+    g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
+
+    // Simple debug: draw RMS bars
+    auto bounds = getLocalBounds().reduced(20);
+    auto rmsValues = getLatestRms();
+
+    const int numBars = juce::jmax(1, rmsValues.size()); // chanels(2)
+    auto barsArea = bounds;//bounds.removeFromBottom (100);
+    const int gap = 20; // Test different values
+    const int barWidth = (barsArea.getWidth() - (gap * (numBars - 1))) / numBars;
+
+    // Draw dynamic RMS bars and numeric labels
+    g.setFont(juce::Font(juce::FontOptions(14.0f)));
+    for (int i = 0; i < numBars; ++i)
+    {
+        const float value = juce::jlimit(0.0f, 1.0f, rmsValues[i]);
+        auto h = juce::roundToInt((float)barsArea.getHeight() * value);
+
+        // 1) Bar meter: X depends on i, H depends on value.
+        auto bar = juce::Rectangle<int>(i * (barWidth + gap) + barsArea.getX(),
+            barsArea.getBottom() - h,
+            barWidth,
+            h);
+
+        // Bar
+        g.setColour(juce::Colours::limegreen);
+        g.fillRect(bar);
+
+        // 2) Numeric label above the bar (linear value 0.00..1.00)
+        juce::String labelText = juce::String(value, 2); // two decimals
+
+        // Place the label slightly above the top of the bar, centered
+        const int labelHeight = 18;
+        // Label bounds: coordinates depends on bar coords.
+        auto labelBounds = juce::Rectangle<int>(bar.getX(),
+            bounds.getBottom(),
+            bar.getWidth(),
+            labelHeight);
+
+        // Draw label with contrasting colour and centered
+        g.setColour(juce::Colours::white);
+        g.drawFittedText(labelText, labelBounds, juce::Justification::centred, 1);
+    }
+}
+
+void MainComponent::resized()
+{
+    // Simple horizontal layout for the buttons and slider row
+    auto area = getLocalBounds().reduced(20);
+    auto buttonHeight = 32;
+    auto row = area.removeFromTop(buttonHeight);
+
+    loadButton.setBounds(row.removeFromLeft(120));
+    row.removeFromLeft(10);
+    playButton.setBounds(row.removeFromLeft(120));
+    row.removeFromLeft(10);
+    stopButton.setBounds(row.removeFromLeft(120));
+
+    // Next row for smoothing control
+    auto controlRow = area.removeFromTop(28);
+    smoothingLabel.setBounds(controlRow.removeFromLeft(100));
+    controlRow.removeFromLeft(8);
+    smoothingSlider.setBounds(controlRow.removeFromLeft(juce::jmax(200, controlRow.getWidth() / 2)));
+
+    // OSC minimal row(s)
+    auto oscRow1 = area.removeFromTop(26);
+    hostLabel.setBounds(oscRow1.removeFromLeft(50));
+    oscRow1.removeFromLeft(6);
+    hostEdit.setBounds(oscRow1.removeFromLeft(160));
+    oscRow1.removeFromLeft(12);
+    portLabel.setBounds(oscRow1.removeFromLeft(40));
+    oscRow1.removeFromLeft(6);
+    portEdit.setBounds(oscRow1.removeFromLeft(80));
+    oscRow1.removeFromLeft(12);
+    addrLabel.setBounds(oscRow1.removeFromLeft(70));
+    oscRow1.removeFromLeft(6);
+    addrEdit.setBounds(oscRow1.removeFromLeft(180));
+    oscRow1.removeFromLeft(12);
+    oscEnableToggle.setBounds(oscRow1.removeFromLeft(120));
+}
+
+//==============================================================================
+void MainComponent::buttonClicked(juce::Button* button)
+{
+    if (button == &loadButton) chooseAndLoadFile();
+    if (button == &playButton) { transport.start(); setButtonsEnabledState(); }
+    if (button == &stopButton) { transport.stop();  setButtonsEnabledState(); }
+}
+
+void MainComponent::setButtonsEnabledState()
+{
+    const bool hasFile = (readerSource != nullptr);
+    const bool isPlaying = transport.isPlaying();
+
+    playButton.setEnabled(hasFile && !isPlaying);
+    stopButton.setEnabled(hasFile && isPlaying);
+
+    // Drive UI updates while playing; stop when not.
+    if (isPlaying)
+    {
+        if (!isTimerRunning())
+            startTimerHz(30); // Test different values
+    }
+    else
+    {
+        stopTimer();
+        // One last repaint to show zeroed meters if stopped
+        repaint();
+    }
+}
+
+juce::Array<float> MainComponent::getLatestRms() const
+{
+    const juce::SpinLock::ScopedLockType sl(rmsLock);
+    return lastRms; // returns a copy
+}
+
+void MainComponent::timerCallback()
+{
+    // Poll transport state transition: if playback stopped externally, update buttons/timer
+    /// Test commenting this code and check what happens when file ends playing
+    if (!transport.isPlaying())
+    {
+        // If we reached the end of the file, rewind so Play works again
+        const double len = transport.getLengthInSeconds();
+        if (len > 0.0 && transport.getCurrentPosition() >= len - 1e-6)
+            transport.setPosition(0.0);
+
+        setButtonsEnabledState();// setButtonsEnabledState will stopTimer and repaint
+        return;
+    }
+
+    // Trigger repaint to update meters
+    repaint();
+
+    /// Send OSC (from message thread) if enabled
+    if (oscEnableToggle.getToggleState() && oscConnected)
+    {
+        // Send combined RMS + peak + envelope in a single OSC message:
+        // [ oscAddress ] <rms_ch0> <rms_ch1> ... <peak> <envelope>
+        sendAudioFeaturesOverOsc();
+    }
+}
+
+void MainComponent::chooseAndLoadFile()
+{
+    // Use async FileChooser so GUI stays responsive
+    auto chooser = std::make_shared<juce::FileChooser>("Select an audio file to play...",
+        juce::File(),
+        "*.wav;*.aiff;*.mp3;*.flac;*.ogg;*.m4a");
+    auto flags = juce::FileBrowserComponent::openMode
+        | juce::FileBrowserComponent::canSelectFiles;
+
+    chooser->launchAsync(flags, [this, chooser](const juce::FileChooser& fc)
+        {
+            auto url = fc.getURLResult(); // Works for local files and sandboxed URLs (iOS/macOS)
+            if (url.isEmpty())
+                return;
+
+            loadURL(url);
+        });
+}
+
+void MainComponent::loadURL(const juce::URL& url)
+{
+    // Stop current playback and detach current source
+    transport.stop();
+    transport.setSource(nullptr);
+    readerSource.reset();
+
+    auto inputStream = url.createInputStream(juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress));
+
+    if (inputStream == nullptr)
+        return;
+
+    // AudioFormatReader: Reads samples from an audio file stream.
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(std::move(inputStream)));
+    if (reader == nullptr)
+        return;
+
+    // Capture the file's sample rate from the reader before transferring ownership
+    const double fileSampleRate = reader->sampleRate;
+
+    // Create the reader source (takes ownership of reader)
+    readerSource.reset(new juce::AudioFormatReaderSource(reader.release(), true));
+
+    // Set the source; pass the file's sample rate so Transport can resample if needed
+    transport.setSource(readerSource.get(), 0, nullptr, fileSampleRate);
+
+    // Reset position to start
+    transport.setPosition(0.0);
+
+    setButtonsEnabledState();
+}
+
+void MainComponent::updateOscConnection()
+{
+    // If connected first disconnect
+    if (oscConnected)
+    {
+        disconnectOsc();
+    }
+
+    // Validate needed config values
+    if (oscHost.isEmpty() || oscPort <= 0)
+    {
+        oscConnected = false;
+        return;
+    }
+
+    oscConnected = oscSender.connect(oscHost, oscPort);
+}
+
+void MainComponent::disconnectOsc()
+{
+    if (oscConnected)
+    {
+        oscSender.disconnect();
+        oscConnected = false;
+    }
+}
+
+void MainComponent::sendRmsOverOsc(const juce::Array<float>& values)
+{
+    if (!oscConnected)
+        return;
+
+    // Use clearer address: base/address + "/rms"
+    juce::String addr = oscAddress.isEmpty() ? "/audio/rms" : (oscAddress + "/rms");
+    juce::OSCMessage msg(addr);
+
+    for (auto v : values)
+        msg.addFloat32(juce::jlimit(0.0f, 1.0f, v));
+
+    // Best-effort send; ignore failures here
+    (void)oscSender.send(msg);
+}
+
+// New: send RMS + peak + envelope in one message (message thread)
+void MainComponent::sendAudioFeaturesOverOsc()
+{
+    if (!oscConnected)
+        return;
+
+    auto rms = getLatestRms();
+
+    float peak = 0.0f;
+    float env = 0.0f;
+    {
+        const juce::SpinLock::ScopedLockType sl(audioFeatLock);
+        peak = lastPeak;
+        env = lastEnvelope;
+    }
+
+    juce::String rmsAddr = oscAddress.isEmpty() ? "/audio/rms" : (oscAddress + "/rms");
+    juce::OSCMessage rmsMsg(rmsAddr);
+    for (auto v : rms)
+        rmsMsg.addFloat32(juce::jlimit(0.0f, 1.0f, v));
+    (void)oscSender.send(rmsMsg);
+
+    juce::String peakAddr = oscAddress.isEmpty() ? "/audio/peak" : (oscAddress + "/peak");
+    juce::OSCMessage peakMsg(peakAddr);
+    peakMsg.addFloat32(juce::jlimit(0.0f, 1.0f, peak));
+    (void)oscSender.send(peakMsg);
+
+    juce::String envAddr = oscAddress.isEmpty() ? "/audio/envelope" : (oscAddress + "/envelope");
+    juce::OSCMessage envMsg(envAddr);
+    envMsg.addFloat32(juce::jlimit(0.0f, 1.0f, env));
+    (void)oscSender.send(envMsg);
+}
+
+void MainComponent::reconnectOscIfEnabled()
+{
+    if (oscEnableToggle.getToggleState())
+    {
+        oscHost = hostEdit.getText().trim();
+        oscPort = portEdit.getText().getIntValue();
+        oscAddress = addrEdit.getText().trim();
+        if (oscAddress.isEmpty())
+            oscAddress = "/audio";
+
+        updateOscConnection();
+    }
+}
+
+void MainComponent::handleOscEnableToggleClicked()
+{
+    if (oscEnableToggle.getToggleState())
+    {
+        // Pull latest from fields settings and connect
+        oscHost = hostEdit.getText().trim();
+        oscPort = portEdit.getText().getIntValue();
+        oscAddress = addrEdit.getText().trim();
+        if (oscAddress.isEmpty()) // default address value
+            oscAddress = "/audio";
+
+        updateOscConnection();
+
+        if (!oscConnected) // Fallback if connection failed
+            oscEnableToggle.setToggleState(false, juce::dontSendNotification);
+    }
+    else
+    {
+        disconnectOsc();
+    }
+}
