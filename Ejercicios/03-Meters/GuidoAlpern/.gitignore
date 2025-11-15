@@ -1,0 +1,6 @@
+JuceLibraryCode/
+Builds/
+
+!src/
+!src/**/
+!src/**/*
