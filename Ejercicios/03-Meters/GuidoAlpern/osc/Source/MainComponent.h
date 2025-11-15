@@ -95,5 +95,20 @@ private:
     // Timer: drive UI meter updates
     void timerCallback() override;
 
+    void calculateInstantRms(const juce::AudioBuffer<float>* buffer,
+        int startSample,
+        int numSamples,
+        juce::Array<float>& instantRms);
+
+    void smoothRmsValues(const juce::Array<float>& instantRms);
+
+    void calculatePeak(const juce::AudioBuffer<float>* buffer,
+        int startSample,
+        int numSamples);
+
+    void calculateEnvelope(const juce::AudioBuffer<float>* buffer,
+        int startSample,
+        int numSamples);
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
