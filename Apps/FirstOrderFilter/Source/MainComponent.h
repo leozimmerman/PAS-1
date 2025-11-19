@@ -7,7 +7,6 @@
 // This component lives inside our window, and this is where you should put all
 // your controls and content.
 class MainComponent  : public juce::AudioAppComponent,
-                       private juce::Button::Listener,
                        private juce::ChangeListener
 {
 public:
@@ -41,9 +40,6 @@ private:
     juce::ComboBox filterTypeBox;
     juce::Label    filterTypeLabel { {}, "Filter Type" };
 
-    // Button::Listener
-    void buttonClicked (juce::Button* button) override;
-
     // ChangeListener (to observe transport state changes)
     void changeListenerCallback (juce::ChangeBroadcaster* source) override;
 
@@ -63,8 +59,7 @@ private:
     std::atomic<FilterType> filterType { FilterType::LowPass };
 
     // per-channel state (z^-1)
-    juce::Array<float> z1; // previous output (for LP) / previous input-output combo (we'll keep one state form)
-
+    juce::Array<float> prevValues; // previous output (for LP) / y[n-1]
     // coefficients
     float a0 { 1.0f };
     float b1 { 0.0f };

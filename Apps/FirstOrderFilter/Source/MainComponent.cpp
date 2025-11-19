@@ -3,8 +3,6 @@
 //==============================================================================
 MainComponent::MainComponent()
 {
-    // Make sure you set the size of the component after
-    // you add any child components.
     setSize (800, 600);
 
     // Transport-related UI
@@ -12,9 +10,19 @@ MainComponent::MainComponent()
     addAndMakeVisible (playButton);
     addAndMakeVisible (stopButton);
 
-    loadButton.onClick = [this] { chooseAndLoadFile(); };
-    playButton.onClick = [this] { audioManager.start(); setButtonsEnabledState(); };
-    stopButton.onClick = [this] { audioManager.stop();  setButtonsEnabledState(); };
+    loadButton.onClick = [this]
+    {
+        chooseAndLoadFile();
+    };
+    playButton.onClick = [this]
+    {
+        audioManager.start();
+        setButtonsEnabledState();
+    };
+    stopButton.onClick = [this] {
+        audioManager.stop();
+        setButtonsEnabledState();
+    };
 
     // Filter UI setup
     // Cutoff slider
@@ -26,7 +34,6 @@ MainComponent::MainComponent()
     cutoffSlider.onValueChange = [this]
     {
         cutoffHz.store ((float) cutoffSlider.getValue(), std::memory_order_relaxed);
-        // coefficients updated in audio thread before processing
     };
     addAndMakeVisible (cutoffSlider);
 
@@ -56,19 +63,7 @@ MainComponent::MainComponent()
 
     // Listen for transport state changes via manager
     audioManager.addChangeListener (this);
-
-    // Some platforms require permissions to open input channels so request that here
-    if (juce::RuntimePermissions::isRequired (juce::RuntimePermissions::recordAudio)
-        && ! juce::RuntimePermissions::isGranted (juce::RuntimePermissions::recordAudio))
-    {
-        juce::RuntimePermissions::request (juce::RuntimePermissions::recordAudio,
-                                           [&] (bool granted) { setAudioChannels (granted ? 2 : 0, 2); });
-    }
-    else
-    {
-        // We only need outputs to play files; inputs can be 0
-        setAudioChannels (0, 2);
-    }
+    setAudioChannels (0, 2);
 }
 
 MainComponent::~MainComponent()
@@ -87,7 +82,7 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
     updateCoefficients();
 
     // reset state (size will be ensured on first getNextAudioBlock)
-    z1.clearQuick();
+    prevValues.clearQuick();
 
     audioManager.prepareToPlay (samplesPerBlockExpected, sampleRate);
 }
@@ -97,7 +92,7 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     // Fill from transport, or clear if no source
     audioManager.getNextAudioBlock (bufferToFill);
 
-    // Apply simple first-order filter in-place
+    
     auto* buffer = bufferToFill.buffer;
     if (buffer == nullptr) return;
 
@@ -106,9 +101,12 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
     const int startSample = bufferToFill.startSample;
 
     ensureStateSize (numChannels);
+    
+    // Apply simple first-order filter in-place
+    
     updateCoefficients(); // cheap, in case cutoff/type changed
 
-    const auto type = filterType.load (std::memory_order_relaxed);
+    const auto type = filterType.load (std::memory_order_relaxed); // atomic, thread-safe
 
     for (int ch = 0; ch < numChannels; ++ch)
     {
@@ -135,17 +133,12 @@ void MainComponent::releaseResources()
 //==============================================================================
 void MainComponent::paint (juce::Graphics& g)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
-
-    // You can add your drawing code here!
 }
 
 void MainComponent::resized()
 {
-    // Layout:
-    // Top row: transport buttons
-    // Next rows: filter controls with labels attached on the left
+
     auto area = getLocalBounds().reduced (20);
 
     // Transport row
@@ -179,14 +172,6 @@ void MainComponent::resized()
 }
 
 //==============================================================================
-void MainComponent::buttonClicked (juce::Button* button)
-{
-    // Not used because we used onClick lambdas, but kept for completeness
-    if (button == &loadButton) chooseAndLoadFile();
-    if (button == &playButton) { audioManager.start(); setButtonsEnabledState(); }
-    if (button == &stopButton) { audioManager.stop();  setButtonsEnabledState(); }
-}
-
 void MainComponent::chooseAndLoadFile()
 {
     // Use async FileChooser so GUI stays responsive
@@ -240,24 +225,24 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 
 void MainComponent::ensureStateSize (int numChannels)
 {
-    if (z1.size() < numChannels)
+    if (prevValues.size() < numChannels)
     {
-        const int oldSize = z1.size();
-        z1.resize (numChannels);
+        const int oldSize = prevValues.size();
+        prevValues.resize (numChannels);
         for (int i = oldSize; i < numChannels; ++i)
-            z1.setUnchecked (i, 0.0f);
+            prevValues.setUnchecked (i, 0.0f);
     }
 }
 
 void MainComponent::updateCoefficients()
 {
-    // One-pole filter using bilinear transform
-    // Low-pass: y[n] = a0 * x[n] + b1 * y[n-1], with
-    // alpha = exp(-2*pi*fc/fs); a0 = 1 - alpha; b1 = alpha
+    // Low-pass: y[n] = a0 * x[n] + b1 * y[n-1],
     // High-pass (complement): y[n] = x[n] - LP(x[n])
-    auto fs = currentSampleRate > 0.0 ? currentSampleRate : 44100.0;
-    auto fc = juce::jlimit (10.0f, (float) (0.45 * fs), cutoffHz.load (std::memory_order_relaxed));
-    const double alpha = std::exp (-2.0 * juce::MathConstants<double>::pi * (double) fc / fs);
+    auto sampleRate = currentSampleRate > 0.0 ? currentSampleRate : 44100.0;
+    // limita cutOffFreq entre 10hz y 45% del Sample Rate, cerca de Nyquist
+ 
+    auto cutOff = juce::jlimit (10.0f, (float) (0.45 * sampleRate), cutoffHz.load (std::memory_order_relaxed));
+    const double alpha = std::exp (-2.0 * juce::MathConstants<double>::pi * (double) cutOff / sampleRate);
 
     a0 = (float) (1.0 - alpha);
     b1 = (float) alpha;
@@ -265,8 +250,8 @@ void MainComponent::updateCoefficients()
 
 inline float MainComponent::processSampleLP (float x, int ch)
 {
-    float y = a0 * x + b1 * z1.getUnchecked (ch);
-    z1.setUnchecked (ch, y);
+    float y = a0 * x + b1 * prevValues.getUnchecked (ch); // prevValues[ch] + Lock
+    prevValues.setUnchecked (ch, y); // prevValues[ch] = y; + Lock
     return y;
 }
 
