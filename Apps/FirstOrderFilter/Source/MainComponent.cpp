@@ -7,17 +7,14 @@ MainComponent::MainComponent()
     // you add any child components.
     setSize (800, 600);
 
-    // Register audio formats we can read
-    formatManager.registerBasicFormats();
-
     // Transport-related UI
     addAndMakeVisible (loadButton);
     addAndMakeVisible (playButton);
     addAndMakeVisible (stopButton);
 
     loadButton.onClick = [this] { chooseAndLoadFile(); };
-    playButton.onClick = [this] { transport.start(); setButtonsEnabledState(); };
-    stopButton.onClick = [this] { transport.stop();  setButtonsEnabledState(); };
+    playButton.onClick = [this] { audioManager.start(); setButtonsEnabledState(); };
+    stopButton.onClick = [this] { audioManager.stop();  setButtonsEnabledState(); };
 
     // Filter UI setup
     // Cutoff slider
@@ -57,9 +54,8 @@ MainComponent::MainComponent()
 
     setButtonsEnabledState();
 
-    // Listen for transport state changes (start/stop/end-of-stream)
-    juce::MessageManagerLock mmLock; // ensure we're on the message thread for listener ops
-    transport.addChangeListener (this);
+    // Listen for transport state changes via manager
+    audioManager.addChangeListener (this);
 
     // Some platforms require permissions to open input channels so request that here
     if (juce::RuntimePermissions::isRequired (juce::RuntimePermissions::recordAudio)
@@ -77,18 +73,10 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
-    {
-        juce::MessageManagerLock mmLock; // remove listener safely
-        transport.removeChangeListener (this);
-    }
+    audioManager.removeChangeListener (this);
 
     // This shuts down the audio device and clears the audio source.
     shutdownAudio();
-
-    // Ensure transport is stopped and reader released before destruction
-    transport.stop();
-    transport.setSource (nullptr);
-    readerSource.reset();
 }
 
 //==============================================================================
@@ -101,19 +89,13 @@ void MainComponent::prepareToPlay (int samplesPerBlockExpected, double sampleRat
     // reset state (size will be ensured on first getNextAudioBlock)
     z1.clearQuick();
 
-    transport.prepareToPlay (samplesPerBlockExpected, sampleRate);
+    audioManager.prepareToPlay (samplesPerBlockExpected, sampleRate);
 }
 
 void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill)
 {
     // Fill from transport, or clear if no source
-    if (readerSource == nullptr)
-    {
-        bufferToFill.clearActiveBufferRegion();
-        return;
-    }
-
-    transport.getNextAudioBlock (bufferToFill);
+    audioManager.getNextAudioBlock (bufferToFill);
 
     // Apply simple first-order filter in-place
     auto* buffer = bufferToFill.buffer;
@@ -147,7 +129,7 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
 void MainComponent::releaseResources()
 {
-    transport.releaseResources();
+    audioManager.releaseResources();
 }
 
 //==============================================================================
@@ -201,8 +183,8 @@ void MainComponent::buttonClicked (juce::Button* button)
 {
     // Not used because we used onClick lambdas, but kept for completeness
     if (button == &loadButton) chooseAndLoadFile();
-    if (button == &playButton) { transport.start(); setButtonsEnabledState(); }
-    if (button == &stopButton) { transport.stop();  setButtonsEnabledState(); }
+    if (button == &playButton) { audioManager.start(); setButtonsEnabledState(); }
+    if (button == &stopButton) { audioManager.stop();  setButtonsEnabledState(); }
 }
 
 void MainComponent::chooseAndLoadFile()
@@ -226,39 +208,14 @@ void MainComponent::chooseAndLoadFile()
 
 void MainComponent::loadURL (const juce::URL& url)
 {
-    // Stop current playback and detach current source
-    transport.stop();
-    transport.setSource (nullptr);
-    readerSource.reset();
-
-    // Open via AudioFormatReader
-    std::unique_ptr<juce::InputStream> inputStream (url.createInputStream (false));
-    if (inputStream == nullptr)
-        return;
-
-    std::unique_ptr<juce::AudioFormatReader> reader (formatManager.createReaderFor (std::move (inputStream)));
-    if (reader == nullptr)
-        return;
-
-    // Capture the file's sample rate from the reader before transferring ownership
-    const double fileSampleRate = reader->sampleRate;
-
-    // Create the reader source (takes ownership of reader)
-    readerSource.reset (new juce::AudioFormatReaderSource (reader.release(), true));
-
-    // Set the source; pass the file's sample rate so Transport can resample if needed
-    transport.setSource (readerSource.get(), 0, nullptr, fileSampleRate);
-
-    // Reset position to start
-    transport.setPosition (0.0);
-
+    audioManager.loadURL (url);
     setButtonsEnabledState();
 }
 
 void MainComponent::setButtonsEnabledState()
 {
-    const bool hasFile = (readerSource != nullptr);
-    const bool isPlaying = transport.isPlaying();
+    const bool hasFile = audioManager.hasFileLoaded();
+    const bool isPlaying = audioManager.isPlaying();
 
     playButton.setEnabled (hasFile && !isPlaying);
     stopButton.setEnabled (hasFile && isPlaying);
@@ -267,11 +224,11 @@ void MainComponent::setButtonsEnabledState()
 // Listen for end-of-stream and other state changes
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
-    if (source == &transport)
+    if (source == audioManager.getTransport())
     {
         // If playback has stopped and the stream finished, rewind to start
-        if (! transport.isPlaying() && transport.hasStreamFinished())
-            transport.setPosition (0.0);
+        if (! audioManager.isPlaying() && audioManager.hasStreamFinished())
+            audioManager.setPosition (0.0);
 
         // Refresh UI state on any change
         setButtonsEnabledState();

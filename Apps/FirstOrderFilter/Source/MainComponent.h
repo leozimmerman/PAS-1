@@ -1,6 +1,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "AudioTransportManager.h"
 
 //==============================================================================
 // This component lives inside our window, and this is where you should put all
@@ -25,10 +26,8 @@ public:
 
 private:
     //==============================================================================
-    // Audio playback members
-    juce::AudioFormatManager formatManager;
-    juce::AudioTransportSource transport;
-    std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+    // Audio playback manager (encapsulates format/transport/reader)
+    AudioTransportManager audioManager;
 
     // Simple UI
     juce::TextButton loadButton { "Load..." };
@@ -52,6 +51,7 @@ private:
     void chooseAndLoadFile();
     void loadURL (const juce::URL& url);
     void setButtonsEnabledState();
+    
 
     //==============================================================================
     // Simple first-order filter (no JUCE filter classes)
