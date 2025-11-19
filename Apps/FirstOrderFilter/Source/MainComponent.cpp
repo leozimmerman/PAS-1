@@ -174,27 +174,8 @@ void MainComponent::resized()
 //==============================================================================
 void MainComponent::chooseAndLoadFile()
 {
-    // Use async FileChooser so GUI stays responsive
-    auto chooser = std::make_shared<juce::FileChooser> ("Select an audio file to play...",
-                                                         juce::File(),
-                                                         "*.wav;*.aiff;*.mp3;*.flac;*.ogg;*.m4a");
-    auto flags = juce::FileBrowserComponent::openMode
-               | juce::FileBrowserComponent::canSelectFiles;
-
-    chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
-    {
-        auto url = fc.getURLResult(); // Works for local files and sandboxed URLs (iOS/macOS)
-        if (url.isEmpty())
-            return;
-
-        loadURL (url);
-    });
-}
-
-void MainComponent::loadURL (const juce::URL& url)
-{
-    audioManager.loadURL (url);
-    setButtonsEnabledState();
+    audioManager.chooseAndLoadFile();
+    playButton.setEnabled(true);
 }
 
 void MainComponent::setButtonsEnabledState()
@@ -240,7 +221,6 @@ void MainComponent::updateCoefficients()
     // High-pass (complement): y[n] = x[n] - LP(x[n])
     auto sampleRate = currentSampleRate > 0.0 ? currentSampleRate : 44100.0;
     // limita cutOffFreq entre 10hz y 45% del Sample Rate, cerca de Nyquist
- 
     auto cutOff = juce::jlimit (10.0f, (float) (0.45 * sampleRate), cutoffHz.load (std::memory_order_relaxed));
     const double alpha = std::exp (-2.0 * juce::MathConstants<double>::pi * (double) cutOff / sampleRate);
 

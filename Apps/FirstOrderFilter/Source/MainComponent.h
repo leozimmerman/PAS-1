@@ -45,9 +45,7 @@ private:
 
     // Helpers
     void chooseAndLoadFile();
-    void loadURL (const juce::URL& url);
     void setButtonsEnabledState();
-    
 
     //==============================================================================
     // Simple first-order filter (no JUCE filter classes)

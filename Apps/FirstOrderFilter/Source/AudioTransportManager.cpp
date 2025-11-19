@@ -95,3 +95,22 @@ void AudioTransportManager::removeChangeListener (juce::ChangeListener* listener
 {
     transport.removeChangeListener(listener);
 }
+
+void AudioTransportManager::chooseAndLoadFile()
+{
+    // Use async FileChooser so GUI stays responsive
+    auto chooser = std::make_shared<juce::FileChooser> ("Select an audio file to play...",
+                                                         juce::File(),
+                                                         "*.wav;*.aiff;*.mp3;*.flac;*.ogg;*.m4a");
+    auto flags = juce::FileBrowserComponent::openMode
+               | juce::FileBrowserComponent::canSelectFiles;
+
+    chooser->launchAsync (flags, [this, chooser] (const juce::FileChooser& fc)
+    {
+        auto url = fc.getURLResult(); // Works for local files and sandboxed URLs (iOS/macOS)
+        if (url.isEmpty())
+            return;
+
+        loadURL (url);
+    });
+}

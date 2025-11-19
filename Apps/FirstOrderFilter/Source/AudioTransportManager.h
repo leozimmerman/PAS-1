@@ -15,6 +15,7 @@ public:
     void releaseResources();
 
     // loading
+    void chooseAndLoadFile();
     bool loadURL (const juce::URL& url);
 
     // transport controls
@@ -29,6 +30,7 @@ public:
     void addChangeListener (juce::ChangeListener* listener);
     void removeChangeListener (juce::ChangeListener* listener);
     
+    juce::ChangeBroadcaster* getTransportBroadcaster() { return &transport; }
     juce::AudioTransportSource* getTransport() { return &transport; }
 
 private:
