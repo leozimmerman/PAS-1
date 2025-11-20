@@ -123,12 +123,15 @@ void MainComponent::prepareDelayState()
     delaySamples = juce::jlimit (1, juce::jmax (1, maxDelaySamples - 1), delaySamples);
 }
 
-void MainComponent::processDelayMonoChannel0 (juce::AudioBuffer<float>& buffer)
+void MainComponent::processDelayChannel (juce::AudioBuffer<float>& buffer, int channelNum)
 {
     if (buffer.getNumSamples() <= 0 || delayBuffer.empty())
         return;
 
-    auto* data = buffer.getWritePointer (0); // only channel 0
+    if (channelNum < 0 || channelNum >= buffer.getNumChannels())
+        return;
+
+    auto* data = buffer.getWritePointer (channelNum);
     const int numSamples = buffer.getNumSamples();
     // delayBuffSize es constante, definido en funcion del maximo de delay permitido (2s.)
     const int delayBuffSize = (int) delayBuffer.size();
@@ -165,9 +168,9 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
     transport.getNextAudioBlock (bufferToFill);
 
-    // Apply simple mono delay on channel 0 only
+    // Apply simple delay on a specific channel (current behavior: channel 0)
     if (bufferToFill.buffer != nullptr && bufferToFill.numSamples > 0 && bufferToFill.buffer->getNumChannels() > 0)
-        processDelayMonoChannel0 (*bufferToFill.buffer);
+        processDelayChannel (*bufferToFill.buffer, 0);
 }
 
 void MainComponent::releaseResources()

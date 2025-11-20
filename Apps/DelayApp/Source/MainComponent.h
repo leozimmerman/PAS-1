@@ -67,7 +67,7 @@ private:
     double currentSampleRate = 44100.0;
 
     void prepareDelayState();
-    void processDelayMonoChannel0 (juce::AudioBuffer<float>& buffer);
+    void processDelayChannel (juce::AudioBuffer<float>& buffer, int channelNum);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
