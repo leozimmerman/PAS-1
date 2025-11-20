@@ -1,0 +1,5 @@
+*
+!.gitignore
+!Source/
+!Source/*
+Source/Main.cpp
