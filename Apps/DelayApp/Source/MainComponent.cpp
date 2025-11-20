@@ -143,14 +143,15 @@ void MainComponent::processDelayChannel (juce::AudioBuffer<float>& buffer, int c
             readPos += delayBuffSize;
 
         const float delayed = delayBuffer[(size_t) readPos];
-        const float in      = data[i];
+        const float in      = data[i]; // read data from buffer
 
         delayBuffer[(size_t) writePos] = in + feedback * delayed;
 
         // Output write to streaming AudioBuffer: dry + wet (fixed 50/50)
         data[i] = in + delayed;
+        //data[i] = delayed; /// Test only delay
 
-        // advance circular index
+        // advance circular index (0-88199)
         writePos = writePos + 1;
         if (writePos == delayBuffSize)
             writePos = 0;
@@ -170,7 +171,10 @@ void MainComponent::getNextAudioBlock (const juce::AudioSourceChannelInfo& buffe
 
     // Apply simple delay on a specific channel (current behavior: channel 0)
     if (bufferToFill.buffer != nullptr && bufferToFill.numSamples > 0 && bufferToFill.buffer->getNumChannels() > 0)
+    {
         processDelayChannel (*bufferToFill.buffer, 0);
+    }
+        
 }
 
 void MainComponent::releaseResources()
