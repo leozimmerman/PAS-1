@@ -77,7 +77,7 @@ MainComponent::MainComponent()
     juce::MessageManagerLock mmLock;
     transport.addChangeListener (this);
 
-    setAudioChannels (0, 2);
+    setAudioChannels (0, 1);
 }
 
 MainComponent::~MainComponent()
