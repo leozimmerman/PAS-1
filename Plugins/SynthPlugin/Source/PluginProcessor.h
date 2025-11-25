@@ -5,12 +5,12 @@
 //==============================================================================
 // Un simple sinte analógico-style: osc + ADSR + filtro LP
 // 
-class SimpleSynthAudioProcessor : public juce::AudioProcessor
+class SynthPluginProcessor : public juce::AudioProcessor
 {
 public:
     //==============================================================================
-    SimpleSynthAudioProcessor();
-    ~SimpleSynthAudioProcessor() override;
+    SynthPluginProcessor();
+    ~SynthPluginProcessor() override;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
@@ -84,5 +84,5 @@ private:
     static float midiToHz (int midiNote) noexcept;
 
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleSynthAudioProcessor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPluginProcessor)
 };

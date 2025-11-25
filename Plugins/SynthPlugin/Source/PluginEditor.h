@@ -5,20 +5,20 @@
 
 //==============================================================================
 // Editor: UI del sinte (waveform, ADSR, filtro, teclado MIDI)
-class SimpleSynthAudioProcessorEditor  : public juce::AudioProcessorEditor,
+class SynthPluginProcessorEditor  : public juce::AudioProcessorEditor,
                                          private juce::ComboBox::Listener,
                                          private juce::Slider::Listener
 {
 public:
-    SimpleSynthAudioProcessorEditor (SimpleSynthAudioProcessor&);
-    ~SimpleSynthAudioProcessorEditor() override;
+    SynthPluginProcessorEditor (SynthPluginProcessor&);
+    ~SynthPluginProcessorEditor() override;
 
     //==============================================================================
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    SimpleSynthAudioProcessor& processor;
+    SynthPluginProcessor& processor;
 
     // UI
     juce::ComboBox waveformBox;
@@ -41,5 +41,5 @@ private:
     void updateFilterFromUI();
 
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleSynthAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPluginProcessorEditor)
 };

@@ -3,13 +3,13 @@
 
 //==============================================================================
 // Utility: map MIDI note to Hz
-float SimpleSynthAudioProcessor::midiToHz (int midiNote) noexcept
+float SynthPluginProcessor::midiToHz (int midiNote) noexcept
 {
     return 440.0f * std::pow (2.0f, (midiNote - 69) / 12.0f);
 }
 
 //==============================================================================
-SimpleSynthAudioProcessor::SimpleSynthAudioProcessor()
+SynthPluginProcessor::SynthPluginProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
     : AudioProcessor (BusesProperties()
                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
@@ -18,10 +18,10 @@ SimpleSynthAudioProcessor::SimpleSynthAudioProcessor()
 {
 }
 
-SimpleSynthAudioProcessor::~SimpleSynthAudioProcessor() = default;
+SynthPluginProcessor::~SynthPluginProcessor() = default;
 
 //==============================================================================
-void SimpleSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void SynthPluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     juce::ignoreUnused (samplesPerBlock);
 
@@ -55,13 +55,13 @@ void SimpleSynthAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
     osc.setFrequency (targetFrequencyHz.load());
 }
 
-void SimpleSynthAudioProcessor::releaseResources()
+void SynthPluginProcessor::releaseResources()
 {
 }
 
 //==============================================================================
 #if ! JucePlugin_PreferredChannelConfigurations
-bool SimpleSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
+bool SynthPluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     // Solo mono o stereo, sin sidechain ni otras rarezas
     if (layouts.getMainOutputChannelSet() != juce::AudioChannelSet::mono()
@@ -77,7 +77,7 @@ bool SimpleSynthAudioProcessor::isBusesLayoutSupported (const BusesLayout& layou
 #endif
 
 //==============================================================================
-void SimpleSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+void SynthPluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                                               juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -152,7 +152,7 @@ void SimpleSynthAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 //==============================================================================
 // Comunicación con el editor
 
-void SimpleSynthAudioProcessor::setWaveform (int index)
+void SynthPluginProcessor::setWaveform (int index)
 {
     currentWaveform.store (juce::jlimit (0, 2, index));
 
@@ -180,7 +180,7 @@ void SimpleSynthAudioProcessor::setWaveform (int index)
     }
 }
 
-void SimpleSynthAudioProcessor::setAdsr (float attack, float decay,
+void SynthPluginProcessor::setAdsr (float attack, float decay,
                                          float sustain, float release)
 {
     adsrParams.attack  = attack;
@@ -190,7 +190,7 @@ void SimpleSynthAudioProcessor::setAdsr (float attack, float decay,
     adsr.setParameters (adsrParams);
 }
 
-void SimpleSynthAudioProcessor::setFilter (float cutoff, float reso)
+void SynthPluginProcessor::setFilter (float cutoff, float reso)
 {
     cutoffHz.store (cutoff);
     const float minReso = 0.1f;
@@ -199,7 +199,7 @@ void SimpleSynthAudioProcessor::setFilter (float cutoff, float reso)
     updateFilterFromAtomics();
 }
 
-void SimpleSynthAudioProcessor::updateFilterFromAtomics()
+void SynthPluginProcessor::updateFilterFromAtomics()
 {
     filter.setCutoffFrequency (cutoffHz.load());
     filter.setResonance (resonance.load());
@@ -208,7 +208,7 @@ void SimpleSynthAudioProcessor::updateFilterFromAtomics()
 //==============================================================================
 // Nota on/off (portado de tu MainComponent)
 
-void SimpleSynthAudioProcessor::startNote (int midiNoteNumber, float velocity)
+void SynthPluginProcessor::startNote (int midiNoteNumber, float velocity)
 {
     const float freq = midiToHz (midiNoteNumber);
     targetFrequencyHz.store (freq);
@@ -222,7 +222,7 @@ void SimpleSynthAudioProcessor::startNote (int midiNoteNumber, float velocity)
     velocityGain.setTargetValue (velocity);
 }
 
-void SimpleSynthAudioProcessor::stopNote (int midiNoteNumber)
+void SynthPluginProcessor::stopNote (int midiNoteNumber)
 {
     if (activeNote.load() == midiNoteNumber)
     {
@@ -234,21 +234,21 @@ void SimpleSynthAudioProcessor::stopNote (int midiNoteNumber)
 //==============================================================================
 // Editor
 
-juce::AudioProcessorEditor* SimpleSynthAudioProcessor::createEditor()
+juce::AudioProcessorEditor* SynthPluginProcessor::createEditor()
 {
-    return new SimpleSynthAudioProcessorEditor (*this);
+    return new SynthPluginProcessorEditor (*this);
 }
 
 //==============================================================================
 // State (por ahora vacío, pero preparado para guardar parámetros)
 
-void SimpleSynthAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
+void SynthPluginProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     juce::ignoreUnused (destData);
     // TODO: guardar parámetros si los pasás a APVTS
 }
 
-void SimpleSynthAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
+void SynthPluginProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     juce::ignoreUnused (data, sizeInBytes);
     // TODO: restaurar parámetros
@@ -257,5 +257,5 @@ void SimpleSynthAudioProcessor::setStateInformation (const void* data, int sizeI
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-    return new SimpleSynthAudioProcessor();
+    return new SynthPluginProcessor();
 }

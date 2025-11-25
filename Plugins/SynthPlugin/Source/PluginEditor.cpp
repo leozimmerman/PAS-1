@@ -2,7 +2,7 @@
 #include "PluginProcessor.h"
 
 //==============================================================================
-SimpleSynthAudioProcessorEditor::SimpleSynthAudioProcessorEditor (SimpleSynthAudioProcessor& p)
+SynthPluginProcessorEditor::SynthPluginProcessorEditor (SynthPluginProcessor& p)
     : juce::AudioProcessorEditor (&p),
       processor (p),
       keyboardComponent (processor.keyboardState,
@@ -76,15 +76,15 @@ SimpleSynthAudioProcessorEditor::SimpleSynthAudioProcessorEditor (SimpleSynthAud
     updateFilterFromUI();
 }
 
-SimpleSynthAudioProcessorEditor::~SimpleSynthAudioProcessorEditor() = default;
+SynthPluginProcessorEditor::~SynthPluginProcessorEditor() = default;
 
 //==============================================================================
-void SimpleSynthAudioProcessorEditor::paint (juce::Graphics& g)
+void SynthPluginProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId));
 }
 
-void SimpleSynthAudioProcessorEditor::resized()
+void SynthPluginProcessorEditor::resized()
 {
     auto area = getLocalBounds().reduced (10);
 
@@ -160,7 +160,7 @@ void SimpleSynthAudioProcessorEditor::resized()
 //==============================================================================
 // Listeners
 
-void SimpleSynthAudioProcessorEditor::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
+void SynthPluginProcessorEditor::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
 {
     if (comboBoxThatHasChanged == &waveformBox)
     {
@@ -169,7 +169,7 @@ void SimpleSynthAudioProcessorEditor::comboBoxChanged (juce::ComboBox* comboBoxT
     }
 }
 
-void SimpleSynthAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
+void SynthPluginProcessorEditor::sliderValueChanged (juce::Slider* slider)
 {
     if (slider == &attackSlider || slider == &decaySlider
         || slider == &sustainSlider || slider == &releaseSlider)
@@ -182,7 +182,7 @@ void SimpleSynthAudioProcessorEditor::sliderValueChanged (juce::Slider* slider)
     }
 }
 
-void SimpleSynthAudioProcessorEditor::updateAdsrFromUI()
+void SynthPluginProcessorEditor::updateAdsrFromUI()
 {
     const float a = (float) attackSlider.getValue();
     const float d = (float) decaySlider.getValue();
@@ -192,7 +192,7 @@ void SimpleSynthAudioProcessorEditor::updateAdsrFromUI()
     processor.setAdsr (a, d, s, r);
 }
 
-void SimpleSynthAudioProcessorEditor::updateFilterFromUI()
+void SynthPluginProcessorEditor::updateFilterFromUI()
 {
     const float cutoff = (float) cutoffSlider.getValue();
     const float reso   = (float) resonanceSlider.getValue();
