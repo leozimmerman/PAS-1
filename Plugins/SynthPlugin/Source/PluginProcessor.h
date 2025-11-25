@@ -2,6 +2,12 @@
 
 #include <JuceHeader.h>
 
+/**
+ - Necesita modulo juce_dsp
+ - Plugin MIDI Input → Enabled
+ - Plugin is a Synth → Enabled
+ */
+
 //==============================================================================
 // Un simple sinte analógico-style: osc + ADSR + filtro LP
 // 
