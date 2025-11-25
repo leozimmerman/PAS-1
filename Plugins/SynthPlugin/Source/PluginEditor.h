@@ -1,33 +1,45 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin editor.
-
-  ==============================================================================
-*/
-
 #pragma once
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
 //==============================================================================
-/**
-*/
-class SynthPluginAudioProcessorEditor  : public juce::AudioProcessorEditor
+// Editor: UI del sinte (waveform, ADSR, filtro, teclado MIDI)
+class SimpleSynthAudioProcessorEditor  : public juce::AudioProcessorEditor,
+                                         private juce::ComboBox::Listener,
+                                         private juce::Slider::Listener
 {
 public:
-    SynthPluginAudioProcessorEditor (SynthPluginAudioProcessor&);
-    ~SynthPluginAudioProcessorEditor() override;
+    SimpleSynthAudioProcessorEditor (SimpleSynthAudioProcessor&);
+    ~SimpleSynthAudioProcessorEditor() override;
 
     //==============================================================================
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
-    // This reference is provided as a quick way for your editor to
-    // access the processor object that created it.
-    SynthPluginAudioProcessor& audioProcessor;
+    SimpleSynthAudioProcessor& processor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPluginAudioProcessorEditor)
+    // UI
+    juce::ComboBox waveformBox;
+    juce::Label   waveformLabel;
+
+    juce::Slider attackSlider, decaySlider, sustainSlider, releaseSlider;
+    juce::Label  attackLabel, decayLabel, sustainLabel, releaseLabel;
+
+    juce::Slider cutoffSlider, resonanceSlider;
+    juce::Label  cutoffLabel, resonanceLabel;
+
+    juce::MidiKeyboardComponent keyboardComponent;
+
+    // Listeners
+    void comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged) override;
+    void sliderValueChanged (juce::Slider* slider) override;
+
+    // Helpers
+    void updateAdsrFromUI();
+    void updateFilterFromUI();
+
+    //==============================================================================
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleSynthAudioProcessorEditor)
 };

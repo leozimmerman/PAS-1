@@ -1,59 +1,88 @@
-/*
-  ==============================================================================
-
-    This file contains the basic framework code for a JUCE plugin processor.
-
-  ==============================================================================
-*/
-
 #pragma once
 
 #include <JuceHeader.h>
 
 //==============================================================================
-/**
-*/
-class SynthPluginAudioProcessor  : public juce::AudioProcessor
+// Un simple sinte analógico-style: osc + ADSR + filtro LP
+// 
+class SimpleSynthAudioProcessor : public juce::AudioProcessor
 {
 public:
     //==============================================================================
-    SynthPluginAudioProcessor();
-    ~SynthPluginAudioProcessor() override;
+    SimpleSynthAudioProcessor();
+    ~SimpleSynthAudioProcessor() override;
 
     //==============================================================================
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
 
-   #ifndef JucePlugin_PreferredChannelConfigurations
+   #if ! JucePlugin_PreferredChannelConfigurations
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
    #endif
 
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlock; // para la versión double si la querés luego
 
     //==============================================================================
     juce::AudioProcessorEditor* createEditor() override;
-    bool hasEditor() const override;
+    bool hasEditor() const override                          { return true; }
 
     //==============================================================================
-    const juce::String getName() const override;
-
-    bool acceptsMidi() const override;
-    bool producesMidi() const override;
-    bool isMidiEffect() const override;
-    double getTailLengthSeconds() const override;
+    const juce::String getName() const override              { return JucePlugin_Name; }
+    bool acceptsMidi() const override                        { return true; }
+    bool producesMidi() const override                       { return false; }
+    bool isMidiEffect() const override                       { return false; }
+    double getTailLengthSeconds() const override             { return 0.0; }
 
     //==============================================================================
-    int getNumPrograms() override;
-    int getCurrentProgram() override;
-    void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override;
-    void changeProgramName (int index, const juce::String& newName) override;
+    int getNumPrograms() override                            { return 1; }
+    int getCurrentProgram() override                         { return 0; }
+    void setCurrentProgram (int) override                    {}
+    const juce::String getProgramName (int) override         { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
 
     //==============================================================================
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    //==============================================================================
+    // MIDI virtual keyboard state compartido con el editor
+    juce::MidiKeyboardState keyboardState;
+
+    // Métodos que llama el editor cuando cambian los controles
+    void setWaveform (int index); // 0: sine, 1: saw, 2: square
+    void setAdsr (float attack, float decay, float sustain, float release);
+    void setFilter (float cutoff, float reso);
+
 private:
     //==============================================================================
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPluginAudioProcessor)
+    // DSP
+    juce::dsp::Oscillator<float> osc;
+    juce::dsp::StateVariableTPTFilter<float> filter;
+    juce::dsp::Gain<float> outputGain;
+    juce::ADSR adsr;
+    juce::ADSR::Parameters adsrParams;
+
+    juce::dsp::ProcessSpec spec {};
+    juce::SmoothedValue<float> velocityGain;
+
+    // Estado
+    std::atomic<float> targetFrequencyHz { 440.0f };
+    std::atomic<int>   currentWaveform   { 0 };      // 0: Sine, 1: Saw, 2: Square
+
+    std::atomic<float> cutoffHz { 20000.0f };
+    std::atomic<float> resonance { 0.7f };
+
+    std::atomic<int> activeNote { -1 };
+
+    // Helpers internos
+    void startNote (int midiNoteNumber, float velocity);
+    void stopNote (int midiNoteNumber);
+
+    void updateFilterFromAtomics();
+
+    static float midiToHz (int midiNote) noexcept;
+
+    //==============================================================================
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SimpleSynthAudioProcessor)
 };
