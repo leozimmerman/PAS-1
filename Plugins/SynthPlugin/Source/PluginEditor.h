@@ -26,6 +26,9 @@ private:
 
     juce::MidiKeyboardComponent keyboardComponent;
 
+    // Version label
+    juce::Label versionLabel;
+    
     using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 

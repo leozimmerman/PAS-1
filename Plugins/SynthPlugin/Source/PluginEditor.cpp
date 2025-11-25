@@ -51,7 +51,17 @@ SynthPluginProcessorEditor::SynthPluginProcessorEditor (SynthPluginProcessor& p)
     addAndMakeVisible (cutoffSlider);
     addAndMakeVisible (resonanceSlider);
 
-    // --- Teclado ---
+    // --- Teclado ----- Version label ---
+   
+    versionLabel.setText ("v.0.1", juce::dontSendNotification);
+    versionLabel.setJustificationType (juce::Justification::centredRight);
+    versionLabel.setColour (juce::Label::textColourId, juce::Colours::grey);
+    versionLabel.setInterceptsMouseClicks (false, false);
+    // Use FontOptions-based constructor to avoid deprecation warning
+    versionLabel.setFont (juce::Font (juce::FontOptions().withHeight (12.0f)));
+    addAndMakeVisible (versionLabel);
+
+    // -
     addAndMakeVisible (keyboardComponent);
 
     // === AQUÍ ES DONDE SE LINKEAN UI <-> APVTS ===
@@ -91,8 +101,11 @@ void SynthPluginProcessorEditor::resized()
         waveformBox.setBounds (wBox);
 
         topRow.removeFromLeft (gap);
+        
+        auto versionBounds = topRow.removeFromRight (140);
+        versionLabel.setBounds (versionBounds);
     }
-
+    
     area.removeFromTop (8); // spacer
 
     // ADSR row
