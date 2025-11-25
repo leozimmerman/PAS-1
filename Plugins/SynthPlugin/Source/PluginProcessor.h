@@ -55,7 +55,9 @@ public:
     // MIDI virtual keyboard state compartido con el editor
     juce::MidiKeyboardState keyboardState;
 
-    // Métodos que llama el editor cuando cambian los controles
+    juce::AudioProcessorValueTreeState apvts;
+
+    // Métodos internos (ya existentes)
     void setWaveform (int index); // 0: sine, 1: saw, 2: square
     void setAdsr (float attack, float decay, float sustain, float release);
     void setFilter (float cutoff, float reso);
@@ -88,6 +90,9 @@ private:
     void updateFilterFromAtomics();
 
     static float midiToHz (int midiNote) noexcept;
+
+    // Layout de parámetros para APVTS
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPluginProcessor)

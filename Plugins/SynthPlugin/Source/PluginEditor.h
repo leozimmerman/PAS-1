@@ -3,23 +3,17 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 
-//==============================================================================
-// Editor: UI del sinte (waveform, ADSR, filtro, teclado MIDI)
-class SynthPluginProcessorEditor  : public juce::AudioProcessorEditor,
-                                         private juce::ComboBox::Listener,
-                                         private juce::Slider::Listener
+class SynthPluginProcessorEditor  : public juce::AudioProcessorEditor
 {
 public:
     SynthPluginProcessorEditor (SynthPluginProcessor&);
     ~SynthPluginProcessorEditor() override;
 
-    //==============================================================================
     void paint (juce::Graphics&) override;
     void resized() override;
 
 private:
     SynthPluginProcessor& processor;
-
     // UI
     juce::ComboBox waveformBox;
     juce::Label   waveformLabel;
@@ -32,14 +26,13 @@ private:
 
     juce::MidiKeyboardComponent keyboardComponent;
 
-    // Listeners
-    void comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged) override;
-    void sliderValueChanged (juce::Slider* slider) override;
+    using SliderAttachment   = juce::AudioProcessorValueTreeState::SliderAttachment;
+    using ComboBoxAttachment = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
 
-    // Helpers
-    void updateAdsrFromUI();
-    void updateFilterFromUI();
+    std::unique_ptr<ComboBoxAttachment> waveformAttachment;
+    std::unique_ptr<SliderAttachment>   attackAttachment, decayAttachment,
+                                        sustainAttachment, releaseAttachment,
+                                        cutoffAttachment, resonanceAttachment;
 
-    //==============================================================================
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SynthPluginProcessorEditor)
 };

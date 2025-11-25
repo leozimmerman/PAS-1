@@ -10,18 +10,16 @@ SynthPluginProcessorEditor::SynthPluginProcessorEditor (SynthPluginProcessor& p)
 {
     setSize (900, 500);
 
-    // --- Waveform -------------------------------------------------------------
+    // --- Waveform ---
     waveformLabel.setText ("Waveform", juce::dontSendNotification);
     addAndMakeVisible (waveformLabel);
 
     waveformBox.addItem ("Sine",   1);
     waveformBox.addItem ("Saw",    2);
     waveformBox.addItem ("Square", 3);
-    waveformBox.setSelectedId (1, juce::dontSendNotification); // sine por defecto
-    waveformBox.addListener (this);
     addAndMakeVisible (waveformBox);
 
-    // --- ADSR -----------------------------------------------------------------
+    // --- ADSR ---
     attackLabel.setText ("A", juce::dontSendNotification);
     decayLabel.setText  ("D", juce::dontSendNotification);
     sustainLabel.setText("S", juce::dontSendNotification);
@@ -37,18 +35,10 @@ SynthPluginProcessorEditor::SynthPluginProcessorEditor (SynthPluginProcessor& p)
     sustainSlider.setRange(0.0,   1.0, 0.0001);
     releaseSlider.setRange(0.001, 2.0, 0.0001);
 
-    attackSlider.setValue (0.01);
-    decaySlider.setValue  (0.2);
-    sustainSlider.setValue(0.8);
-    releaseSlider.setValue(0.3);
-
     for (auto* s : { &attackSlider, &decaySlider, &sustainSlider, &releaseSlider })
-    {
-        s->addListener (this);
         addAndMakeVisible (*s);
-    }
 
-    // --- Filtro ---------------------------------------------------------------
+    // --- Filtro ---
     cutoffLabel.setText ("Cutoff", juce::dontSendNotification);
     resonanceLabel.setText ("Reso", juce::dontSendNotification);
     addAndMakeVisible (cutoffLabel);
@@ -56,24 +46,25 @@ SynthPluginProcessorEditor::SynthPluginProcessorEditor (SynthPluginProcessor& p)
 
     cutoffSlider.setRange (20.0, 20000.0, 0.01);
     cutoffSlider.setSkewFactorFromMidPoint (1000.0);
-    cutoffSlider.setValue (cutoffSlider.getMaximum(), juce::dontSendNotification);
-
     resonanceSlider.setRange (0.1, 2.0, 0.001);
-    resonanceSlider.setValue (0.7f); // valor inicial razonable
 
-    for (auto* s : { &cutoffSlider, &resonanceSlider })
-    {
-        s->addListener (this);
-        addAndMakeVisible (*s);
-    }
+    addAndMakeVisible (cutoffSlider);
+    addAndMakeVisible (resonanceSlider);
 
-    // --- Teclado MIDI ---------------------------------------------------------
+    // --- Teclado ---
     addAndMakeVisible (keyboardComponent);
 
-    // Enviar los valores iniciales al processor
-    processor.setWaveform (0);
-    updateAdsrFromUI();
-    updateFilterFromUI();
+    // === AQUÍ ES DONDE SE LINKEAN UI <-> APVTS ===
+    waveformAttachment  = std::make_unique<ComboBoxAttachment> (processor.apvts, "WAVEFORM",  waveformBox);
+
+    attackAttachment    = std::make_unique<SliderAttachment>   (processor.apvts, "ATTACK",    attackSlider);
+    decayAttachment     = std::make_unique<SliderAttachment>   (processor.apvts, "DECAY",     decaySlider);
+    sustainAttachment   = std::make_unique<SliderAttachment>   (processor.apvts, "SUSTAIN",   sustainSlider);
+    releaseAttachment   = std::make_unique<SliderAttachment>   (processor.apvts, "RELEASE",   releaseSlider);
+
+    cutoffAttachment    = std::make_unique<SliderAttachment>   (processor.apvts, "CUTOFF",    cutoffSlider);
+    resonanceAttachment = std::make_unique<SliderAttachment>   (processor.apvts, "RESONANCE", resonanceSlider);
+
 }
 
 SynthPluginProcessorEditor::~SynthPluginProcessorEditor() = default;
@@ -155,47 +146,4 @@ void SynthPluginProcessorEditor::resized()
     area.removeFromTop (8); // spacer
 
     keyboardComponent.setBounds (area);
-}
-
-//==============================================================================
-// Listeners
-
-void SynthPluginProcessorEditor::comboBoxChanged (juce::ComboBox* comboBoxThatHasChanged)
-{
-    if (comboBoxThatHasChanged == &waveformBox)
-    {
-        const int idx = waveformBox.getSelectedId() - 1; // 0-based
-        processor.setWaveform (idx);
-    }
-}
-
-void SynthPluginProcessorEditor::sliderValueChanged (juce::Slider* slider)
-{
-    if (slider == &attackSlider || slider == &decaySlider
-        || slider == &sustainSlider || slider == &releaseSlider)
-    {
-        updateAdsrFromUI();
-    }
-    else if (slider == &cutoffSlider || slider == &resonanceSlider)
-    {
-        updateFilterFromUI();
-    }
-}
-
-void SynthPluginProcessorEditor::updateAdsrFromUI()
-{
-    const float a = (float) attackSlider.getValue();
-    const float d = (float) decaySlider.getValue();
-    const float s = (float) sustainSlider.getValue();
-    const float r = (float) releaseSlider.getValue();
-
-    processor.setAdsr (a, d, s, r);
-}
-
-void SynthPluginProcessorEditor::updateFilterFromUI()
-{
-    const float cutoff = (float) cutoffSlider.getValue();
-    const float reso   = (float) resonanceSlider.getValue();
-
-    processor.setFilter (cutoff, reso);
 }

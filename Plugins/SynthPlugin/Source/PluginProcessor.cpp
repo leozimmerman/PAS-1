@@ -1,8 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-//==============================================================================
-// Utility: map MIDI note to Hz
 float SynthPluginProcessor::midiToHz (int midiNote) noexcept
 {
     return 440.0f * std::pow (2.0f, (midiNote - 69) / 12.0f);
@@ -13,12 +11,71 @@ SynthPluginProcessor::SynthPluginProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
     : AudioProcessor (BusesProperties()
                       .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+                      .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+#else
+    : AudioProcessor (BusesProperties()),
 #endif
+      apvts (*this, nullptr, "PARAMS", createParameterLayout())
 {
 }
 
 SynthPluginProcessor::~SynthPluginProcessor() = default;
+
+//==============================================================================
+juce::AudioProcessorValueTreeState::ParameterLayout SynthPluginProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+
+    using namespace juce;
+
+    // Waveform: 0 = Sine, 1 = Saw, 2 = Square
+    params.push_back (std::make_unique<AudioParameterChoice>(
+        ParameterID { "WAVEFORM", 1 },      // <-- versionHint = 1
+        "Waveform",
+        StringArray { "Sine", "Saw", "Square" },
+        0));
+
+    // ADSR
+    params.push_back (std::make_unique<AudioParameterFloat>(
+        ParameterID { "ATTACK", 1 },
+        "Attack",
+        NormalisableRange<float> (0.001f, 2.0f, 0.0001f, 0.3f),
+        0.01f));
+
+    params.push_back (std::make_unique<AudioParameterFloat>(
+        ParameterID { "DECAY", 1 },
+        "Decay",
+        NormalisableRange<float> (0.001f, 2.0f, 0.0001f, 0.3f),
+        0.2f));
+
+    params.push_back (std::make_unique<AudioParameterFloat>(
+        ParameterID { "SUSTAIN", 1 },
+        "Sustain",
+        NormalisableRange<float> (0.0f, 1.0f, 0.0001f, 1.0f),
+        0.8f));
+
+    params.push_back (std::make_unique<AudioParameterFloat>(
+        ParameterID { "RELEASE", 1 },
+        "Release",
+        NormalisableRange<float> (0.001f, 2.0f, 0.0001f, 0.3f),
+        0.3f));
+
+    // Filtro
+    params.push_back (std::make_unique<AudioParameterFloat>(
+        ParameterID { "CUTOFF", 1 },
+        "Cutoff",
+        NormalisableRange<float> (20.0f, 20000.0f, 0.01f, 0.4f),
+        20000.0f));
+
+    params.push_back (std::make_unique<AudioParameterFloat>(
+        ParameterID { "RESONANCE", 1 },
+        "Resonance",
+        NormalisableRange<float> (0.1f, 2.0f, 0.001f, 0.5f),
+        0.7f));
+
+    return { params.begin(), params.end() };
+}
+
 
 //==============================================================================
 void SynthPluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -37,21 +94,29 @@ void SynthPluginProcessor::prepareToPlay (double sampleRate, int samplesPerBlock
     filter.prepare (monoSpec);
     outputGain.prepare (spec);
 
-    // Smooth para velocity (20 ms)
     velocityGain.reset (sampleRate, 0.02);
-
     filter.setType (juce::dsp::StateVariableTPTFilterType::lowpass);
 
     adsr.setSampleRate (sampleRate);
     adsr.reset();
 
-    // Defaults similares a tu MainComponent
-    outputGain.setGainLinear (0.2f);
-    setWaveform (currentWaveform.load());
-    setAdsr (0.01f, 0.2f, 0.8f, 0.3f);
-    setFilter (cutoffHz.load(), resonance.load());
+    // Valores iniciales desde APVTS
+    auto* waveParam   = apvts.getRawParameterValue ("WAVEFORM");
+    auto* attackParam = apvts.getRawParameterValue ("ATTACK");
+    auto* decayParam  = apvts.getRawParameterValue ("DECAY");
+    auto* sustainParam= apvts.getRawParameterValue ("SUSTAIN");
+    auto* releaseParam= apvts.getRawParameterValue ("RELEASE");
+    auto* cutoffParam = apvts.getRawParameterValue ("CUTOFF");
+    auto* resoParam   = apvts.getRawParameterValue ("RESONANCE");
 
-    // Frecuencia inicial
+    setWaveform ((int) std::round (waveParam->load()));
+    setAdsr (attackParam->load(),
+             decayParam->load(),
+             sustainParam->load(),
+             releaseParam->load());
+    setFilter (cutoffParam->load(), resoParam->load());
+
+    outputGain.setGainLinear (0.2f); // si querés, esto también puede ser un parámetro
     osc.setFrequency (targetFrequencyHz.load());
 }
 
@@ -77,24 +142,40 @@ bool SynthPluginProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 #endif
 
 //==============================================================================
-void SynthPluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
-                                              juce::MidiBuffer& midiMessages)
+void SynthPluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
     juce::ScopedNoDenormals noDenormals;
 
     const int totalNumInputChannels  = getTotalNumInputChannels();
     const int totalNumOutputChannels = getTotalNumOutputChannels();
-
     const int numSamples = buffer.getNumSamples();
 
-    // Limpiar canales que sobren
     for (int ch = totalNumInputChannels; ch < totalNumOutputChannels; ++ch)
         buffer.clear (ch, 0, numSamples);
 
-    // Mezclar el MIDI del teclado on-screen con el MIDI del host
+    // --- Actualizar parámetros desde APVTS ---
+    auto* waveParam   = apvts.getRawParameterValue ("WAVEFORM");
+    auto* attackParam = apvts.getRawParameterValue ("ATTACK");
+    auto* decayParam  = apvts.getRawParameterValue ("DECAY");
+    auto* sustainParam= apvts.getRawParameterValue ("SUSTAIN");
+    auto* releaseParam= apvts.getRawParameterValue ("RELEASE");
+    auto* cutoffParam = apvts.getRawParameterValue ("CUTOFF");
+    auto* resoParam   = apvts.getRawParameterValue ("RESONANCE");
+
+    const int waveIndex = (int) std::round (waveParam->load());
+    if (waveIndex != currentWaveform.load())
+        setWaveform (waveIndex);
+
+    setAdsr (attackParam->load(),
+             decayParam->load(),
+             sustainParam->load(),
+             releaseParam->load());
+
+    setFilter (cutoffParam->load(), resoParam->load());
+
+    // --- MIDI (igual que antes) ---
     keyboardState.processNextMidiBuffer (midiMessages, 0, numSamples, true);
 
-    // Parsear MIDI para notas
     for (const auto metadata : midiMessages)
     {
         const auto msg = metadata.getMessage();
@@ -105,13 +186,12 @@ void SynthPluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             stopNote (msg.getNoteNumber());
     }
 
-    // Generar audio (similar a tu getNextAudioBlock)
+    // --- Generación de audio (igual que ya tenías) ---
     buffer.clear();
 
     juce::dsp::AudioBlock<float> audioBlock (buffer);
-    auto sub = audioBlock; // bloque completo
+    auto sub = audioBlock;
 
-    // Mono temp buffer
     juce::HeapBlock<float> monoData;
     monoData.allocate ((size_t) numSamples, true);
 
@@ -119,20 +199,16 @@ void SynthPluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     juce::dsp::AudioBlock<float> monoBlock (monoChans, (size_t) 1, (size_t) numSamples);
     juce::dsp::ProcessContextReplacing<float> monoContext (monoBlock);
 
-    // Osc
     osc.process (monoContext);
 
-    // ADSR sobre la señal mono
     {
         juce::AudioBuffer<float> monoAudioBuffer (monoChans, 1, numSamples);
         adsr.applyEnvelopeToBuffer (monoAudioBuffer, 0, numSamples);
     }
 
-    // Filtro
     updateFilterFromAtomics();
     filter.process (monoContext);
 
-    // Velocity smoothing per-sample
     float* mono = monoBlock.getChannelPointer (0);
     for (int i = 0; i < numSamples; ++i)
     {
@@ -140,11 +216,9 @@ void SynthPluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         mono[i] *= smoothVal;
     }
 
-    // Copiar mono a todos los canales de salida
     for (int ch = 0; ch < totalNumOutputChannels; ++ch)
         buffer.copyFrom (ch, 0, mono, numSamples);
 
-    // Ganancia de salida
     juce::dsp::ProcessContextReplacing<float> stereoContext (sub);
     outputGain.process (stereoContext);
 }
@@ -240,19 +314,21 @@ juce::AudioProcessorEditor* SynthPluginProcessor::createEditor()
 }
 
 //==============================================================================
-// State (por ahora vacío, pero preparado para guardar parámetros)
-
 void SynthPluginProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::ignoreUnused (destData);
-    // TODO: guardar parámetros si los pasás a APVTS
+    auto state = apvts.copyState();
+    std::unique_ptr<juce::XmlElement> xml (state.createXml());
+    copyXmlToBinary (*xml, destData);
 }
 
 void SynthPluginProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    juce::ignoreUnused (data, sizeInBytes);
-    // TODO: restaurar parámetros
+    std::unique_ptr<juce::XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
+
+    if (xml != nullptr && xml->hasTagName (apvts.state.getType()))
+        apvts.replaceState (juce::ValueTree::fromXml (*xml));
 }
+
 //==============================================================================
 // This creates new instances of the plugin..
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
