@@ -7,8 +7,8 @@
     This component lives inside our window, and this is where you should put all
     your controls and content.
 */
-class MainComponent  :  public juce::AudioAppComponent,
-                        private juce::ChangeListener
+class MainComponent : public juce::AudioAppComponent,
+    private juce::ChangeListener
 {
 public:
     //==============================================================================
@@ -16,12 +16,12 @@ public:
     ~MainComponent() override;
 
     //==============================================================================
-    void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;
-    void getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill) override;
+    void prepareToPlay(int samplesPerBlockExpected, double sampleRate) override;
+    void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
     void releaseResources() override;
 
     //==============================================================================
-    void paint (juce::Graphics& g) override;
+    void paint(juce::Graphics& g) override;
     void resized() override;
 
 private:
@@ -32,30 +32,35 @@ private:
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
 
     // Simple UI
-    juce::TextButton loadButton { "Load..." };
-    juce::TextButton playButton { "Play" };
-    juce::TextButton stopButton { "Stop" };
+    juce::TextButton loadButton{ "Load..." };
+    juce::TextButton playButton{ "Play" };
+    juce::TextButton stopButton{ "Stop" };
 
     // Delay parameter controls
-    juce::Slider delayTimeSlider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
-    juce::Label  delayTimeLabel  { {}, "Time (ms)" };
+    juce::Slider mixSlider; // Agrego un slider para la mezcla dry/wet
+    juce::Label  mixLabel{ {}, "Dry/Wet" };
 
-    juce::Slider feedbackSlider  { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
-    juce::Label  feedbackLabel   { {}, "Feedback" };
+    juce::Slider delayTimeSlider{ juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+    juce::Label  delayTimeLabel{ {}, "Time (ms)" };
+
+    juce::Slider feedbackSlider{ juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+    juce::Label  feedbackLabel{ {}, "Feedback" };
 
     // ChangeListener (to observe transport state changes)
-    void changeListenerCallback (juce::ChangeBroadcaster* source) override;
+    void changeListenerCallback(juce::ChangeBroadcaster* source) override;
 
     // Helpers
     void chooseAndLoadFile();
-    void loadURL (const juce::URL& url);
+    void loadURL(const juce::URL& url);
     void setButtonsEnabledState();
 
     //==============================================================================
     // Simple mono delay state (channel 0 only)
     // Parameters
-    float delayTimeMs   = 400.0f;  // delay time in milliseconds (mapped to delaySamples)
-    float feedback      = 0.35f;   // 0..<1
+    float wetMix = 0.5f; // Agregado: wetMix y dryMix para la mezcla dry/wet
+    float dryMix = 0.5f;
+    float delayTimeMs = 400.0f;  // delay time in milliseconds (mapped to delaySamples)
+    float feedback = 0.35f;   // 0..<1
 
     // Delay buffer (single channel)
     std::vector<float> delayBuffer;
@@ -64,10 +69,14 @@ private:
 
     // Limits and rate
     int maxDelaySamples = 0;
+
+    // para el wire-AND-ing
+    int delayMask = 0;
+
     double currentSampleRate = 44100.0;
 
     void prepareDelayState();
-    void processDelayChannel (juce::AudioBuffer<float>& buffer, int channelNum);
+    void processDelayChannel(juce::AudioBuffer<float>& buffer, int channelNum);
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
