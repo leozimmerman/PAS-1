@@ -5,7 +5,7 @@ MainComponent::MainComponent()
 {
     // Make sure you set the size of the component after
     // you add any child components.
-    setSize(900, 600);
+    setSize(800, 400);
 
     // Register audio formats we can read
     formatManager.registerBasicFormats();
@@ -35,11 +35,21 @@ MainComponent::MainComponent()
     mixSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
     mixSlider.setRange(0.0, 1.0, 0.01);
     mixSlider.setValue(0.5f);
-
+    /*
     delayTimeSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     delayTimeSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
     delayTimeSlider.setRange(1.0, 2000.0, 1.0); // ms
     delayTimeSlider.setValue(delayTimeMs);
+    */
+    depthSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    depthSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
+    depthSlider.setRange(0.0, 20.0, 0.01);
+    depthSlider.setValue(depthMs);
+
+    rateSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
+    rateSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
+    rateSlider.setRange(0.01, 10.0, 0.01);
+    rateSlider.setValue(lfoRateHz);
 
     feedbackSlider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
     feedbackSlider.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 70, 20);
@@ -48,18 +58,26 @@ MainComponent::MainComponent()
 
     // Labels
     mixLabel.attachToComponent(&mixSlider, false);
-    delayTimeLabel.attachToComponent(&delayTimeSlider, false);
+    //delayTimeLabel.attachToComponent(&delayTimeSlider, false);
+    depthLabel.attachToComponent(&depthSlider, false);
+    rateLabel.attachToComponent(&rateSlider, false);
     feedbackLabel.attachToComponent(&feedbackSlider, false);
 
     mixLabel.setJustificationType(juce::Justification::centred);
-    delayTimeLabel.setJustificationType(juce::Justification::centred);
+    //delayTimeLabel.setJustificationType(juce::Justification::centred);
+    depthLabel.setJustificationType(juce::Justification::centred);
+    rateLabel.setJustificationType(juce::Justification::centred);
     feedbackLabel.setJustificationType(juce::Justification::centred);
 
     addAndMakeVisible(mixSlider); // Agrego
-    addAndMakeVisible(delayTimeSlider);
+    //addAndMakeVisible(delayTimeSlider);
+    addAndMakeVisible(depthSlider); // Agrego
+    addAndMakeVisible(rateSlider); // Agrego
     addAndMakeVisible(feedbackSlider);
     addAndMakeVisible(mixLabel); // Agrego
-    addAndMakeVisible(delayTimeLabel);
+    //dAndMakeVisible(delayTimeLabel);
+    addAndMakeVisible(depthLabel); // Agrego
+    addAndMakeVisible(rateLabel); // Agrego
     addAndMakeVisible(feedbackLabel);
 
     // Slider callbacks
@@ -69,7 +87,7 @@ MainComponent::MainComponent()
             wetMix = (float)mixSlider.getValue(); // El slider controla el valor de wet
             dryMix = 1.0f - wetMix; // los dos suman 1
         };
-
+    /*
     delayTimeSlider.onValueChange = [this]
         {
             delayTimeMs = (float)delayTimeSlider.getValue();
@@ -82,6 +100,19 @@ MainComponent::MainComponent()
             else
                 delaySamples = juce::jmax(1, newDelaySamples);
         };
+     */
+    depthSlider.onValueChange = [this]
+        {
+            depthMs = (float)depthSlider.getValue();
+        };
+
+    rateSlider.onValueChange = [this]
+        {
+            lfoRateHz = (float)rateSlider.getValue();
+
+            if (currentSampleRate > 0)
+                lfoIncrement = juce::MathConstants<float>::twoPi * (lfoRateHz / currentSampleRate);
+        };
 
     feedbackSlider.onValueChange = [this]
         {
@@ -93,7 +124,7 @@ MainComponent::MainComponent()
     juce::MessageManagerLock mmLock;
     transport.addChangeListener(this);
 
-    setAudioChannels(0, 1);
+    setAudioChannels(0, 2);
 }
 
 MainComponent::~MainComponent()
@@ -123,8 +154,47 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
     prepareDelayState();
 
     // Ensure delaySamples matches current delayTimeMs
-    delayTimeSlider.onValueChange();
+    //delayTimeSlider.onValueChange();
+    // Calculo el paso del LFO en radianes por muestra.
+    lfoIncrement = juce::MathConstants<float>::twoPi * (lfoRateHz / currentSampleRate);
+    lfoPhase = 0.0f;
 }
+/*
+float MainComponent::processLFO()
+{
+    // Triangular unipolar 0..1..0..1..
+    float value;
+
+    if (lfoPhase < juce::MathConstants<float>::pi)
+        value = lfoPhase / juce::MathConstants<float>::pi;               // Subida 0→1
+    else
+        value = 2.0f - (lfoPhase / juce::MathConstants<float>::pi);      // Bajada 1→0
+
+    // Avanza fase
+    lfoPhase += lfoIncrement;
+    if (lfoPhase >= juce::MathConstants<float>::twoPi)
+        lfoPhase -= juce::MathConstants<float>::twoPi;
+
+    return value; // Unipolar 0..1
+}
+*/
+// El código comentado arriba es para que el lfo sea triangular
+float MainComponent::processLFO()
+{
+    // LFO senoidal
+    // el seno da valores en (-1,1)
+    // le sumo 1 y da valores en (0,2)
+    // lo multiplico por 0.5 y queda en (0,1)
+    float value = 0.5f * (1.0f + std::sin(lfoPhase));
+
+    // incremento la fase
+    lfoPhase += lfoIncrement;
+    if (lfoPhase >= juce::MathConstants<float>::twoPi)
+        lfoPhase -= juce::MathConstants<float>::twoPi;
+
+    return value;
+}
+
 
 void MainComponent::prepareDelayState()
 {
@@ -148,11 +218,9 @@ void MainComponent::prepareDelayState()
 
     writePos = 0;
 
-    // Clamp delaySamples to valid range
-    delaySamples = juce::jlimit(1, juce::jmax(1, maxDelaySamples - 1), delaySamples);
 }
 
-void MainComponent::processDelayChannel(juce::AudioBuffer<float>& buffer, int channelNum)
+void MainComponent::processFlangerChannel(juce::AudioBuffer<float>& buffer, int channelNum)
 {
     if (buffer.getNumSamples() <= 0 || delayBuffer.empty())
         return;
@@ -172,11 +240,35 @@ void MainComponent::processDelayChannel(juce::AudioBuffer<float>& buffer, int ch
         if (readPos < 0)
             readPos += delayBuffSize;
         */
-        int readPos = (writePos - delaySamples) & delayMask; // se hace wire-AND con la máscara
+        //int readPos = (writePos - delaySamples) & delayMask; // se hace wire-AND con la máscara
+        
+        float lfoValue = processLFO(); // Obtengo el valor del LFO entre 0 y 1
 
+        // Calculo delay actual modulado por el lfo
+        float currentDelayMs = depthMs * lfoValue; // un valor entre 0 y Depth (en milisegundos)
+        float delaySamples = (currentDelayMs * 0.001f) * currentSampleRate; // paso a muestras (pasando primero por segundos)
 
-        const float delayed = delayBuffer[(size_t)readPos];
-        const float in = data[i]; // read data from buffer
+        // Calculo la posición de lectura con precisión flotante
+        float readPosFloat = (float)writePos - delaySamples;
+
+        // Ajustamos para wrap-around manual si es negativo
+        if (readPosFloat < 0.0f)
+            readPosFloat += (float)maxDelaySamples;
+
+        // Índices enteros para interpolación
+        int idxA = (int)readPosFloat;
+        int idxB = (idxA + 1) & delayMask;
+
+        // Parte fraccionaria
+        float frac = readPosFloat - (float)idxA;
+
+        // Interpolación lineal
+        float delayed =
+            delayBuffer[(size_t)idxA] * (1.0f - frac) +
+            delayBuffer[(size_t)idxB] * frac;
+
+        //const float in = data[i]; // read data from buffer
+        float in = data[i];
 
         delayBuffer[(size_t)writePos] = in + feedback * delayed;
 
@@ -207,11 +299,17 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 
     transport.getNextAudioBlock(bufferToFill);
 
-    // Apply simple delay on a specific channel (current behavior: channel 0)
-    if (bufferToFill.buffer != nullptr && bufferToFill.numSamples > 0 && bufferToFill.buffer->getNumChannels() > 0)
-    {
-        processDelayChannel(*bufferToFill.buffer, 0);
-    }
+    auto* buf = bufferToFill.buffer;
+
+    if (buf == nullptr || bufferToFill.numSamples <= 0)
+        return;
+
+    // Procesás solo L
+    processFlangerChannel(*buf, 0);
+
+    // Si hay dos canales, copio L → R
+    if (buf->getNumChannels() > 1)
+        buf->copyFrom(1, 0, *buf, 0, 0, bufferToFill.numSamples);
 
 }
 
@@ -244,28 +342,46 @@ void MainComponent::resized()
     row.removeFromLeft(10);
     stopButton.setBounds(row.removeFromLeft(120));
 
-    area.removeFromTop(20);
+    area.removeFromTop(10);
 
     // Below: two rotary sliders in a row (time, feedback)
     auto controlsArea = area.removeFromTop(200);
-    auto numKnobs = 3; // Agregué un knob
+    auto numKnobs = 4;
     auto knobWidth = controlsArea.getWidth() / numKnobs;
 
-    auto placeKnob = [](juce::Component& c, juce::Rectangle<int> r)
+    auto placeKnob = [](juce::Slider& slider, juce::Label& label, juce::Rectangle<int> r)
         {
-            c.setBounds(r.reduced(10));
+            r = r.reduced(10);
+
+            // bajo el knob 50 px
+            r.setY(r.getY() + 50);
+            slider.setBounds(r);
+
+            // el label 20 px por arriba del knob
+            label.setBounds(
+                r.getX(),
+                r.getY() - 20,
+                r.getWidth(),
+                20
+            );
         };
 
     juce::Rectangle<int> col;
 
     col = controlsArea.removeFromLeft(knobWidth);
-    placeKnob(mixSlider, col);
-
+    placeKnob(mixSlider, mixLabel, col);
+    /*
     col = controlsArea.removeFromLeft(knobWidth);
     placeKnob(delayTimeSlider, col);
+    */
+    col = controlsArea.removeFromLeft(knobWidth);
+    placeKnob(depthSlider, depthLabel, col);
 
     col = controlsArea.removeFromLeft(knobWidth);
-    placeKnob(feedbackSlider, col);
+    placeKnob(rateSlider, rateLabel, col);
+
+    col = controlsArea.removeFromLeft(knobWidth);
+    placeKnob(feedbackSlider, feedbackLabel, col);
 }
 
 void MainComponent::chooseAndLoadFile()
