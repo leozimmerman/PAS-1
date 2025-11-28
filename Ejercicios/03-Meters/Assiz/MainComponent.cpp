@@ -315,6 +315,24 @@ float MainComponent::rmsToDbFs (float rms) const
     return 20.0f * std::log10 (rms);
 }
 
+float MainComponent::dbToVisualPos (float db) const
+{
+    // Convierte un valor dBFS a posición visual (0-1) usando una curva exponencial
+    // La función mapea: dBFS → posición visual (0-1)
+    // Usa una curva exponencial para distribuir mejor los valores y hacer
+    // los segmentos más visibles y proporcionales a los umbrales configurados
+    
+    const float minDb = -60.0f;  // Rango mínimo de dBFS a mostrar
+    
+    if (db <= minDb) return 0.0f;
+    if (db >= 0.0f) return 1.0f;
+    
+    // Mapeo exponencial: más sensible en el rango medio-alto
+    const float normalized = (db - minDb) / (0.0f - minDb);  // 0 a 1
+    // Aplicar curva exponencial para distribuir mejor (exponente < 1 hace la curva más suave)
+    return std::pow (normalized, 0.7f);
+}
+
 //==============================================================================
 // MÓDULO: Renderizado de la Interfaz Gráfica
 //==============================================================================
@@ -380,29 +398,11 @@ void MainComponent::paint (juce::Graphics& g)
         // ============================================================================
         // MÓDULO: Cálculo de Tamaños de Segmentos Dinámicos
         // ============================================================================
-        // Calcular posiciones visuales de los umbrales usando una función de mapeo
-        // que convierte valores dBFS a posiciones en el medidor (0-1).
-        // La función usa una curva exponencial para distribuir mejor los valores
-        // y hacer los segmentos más visibles y proporcionales a los umbrales configurados.
+        // Calcular posiciones visuales de los umbrales usando función de mapeo
+        // que convierte valores dBFS a posiciones en el medidor (0-1)
         
-        const float minDb = -60.0f;  // Rango mínimo de dBFS a mostrar
-        
-        // Mapear a posiciones visuales usando una función que distribuya mejor los valores
-        // Usamos una función exponencial para hacer los segmentos más visibles
-        // La función mapea: dBFS → posición visual (0-1)
-        auto dbToVisualPosition = [minDb] (float db) -> float
-        {
-            if (db <= minDb) return 0.0f;
-            if (db >= 0.0f) return 1.0f;
-            // Mapeo exponencial: más sensible en el rango medio-alto
-            const float normalized = (db - minDb) / (0.0f - minDb);  // 0 a 1
-            // Aplicar curva exponencial para distribuir mejor
-            return std::pow (normalized, 0.7f);  // Exponente < 1 hace la curva más suave
-        };
-        
-        // Calcular posiciones visuales de los umbrales
-        const float greenVisualPos = dbToVisualPosition (greenThresholdDb);
-        const float yellowVisualPos = dbToVisualPosition (yellowThresholdDb);
+        const float greenVisualPos = dbToVisualPos (greenThresholdDb);
+        const float yellowVisualPos = dbToVisualPos (yellowThresholdDb);
         
         // Calcular anchos de cada segmento en píxeles
         const int greenWidth = juce::roundToInt ((float) totalMeterWidth * greenVisualPos);
@@ -447,7 +447,7 @@ void MainComponent::paint (juce::Graphics& g)
         if (rmsValue > 0.0f)
         {
             // Calcular posición visual del valor actual
-            const float visualPosition = dbToVisualPosition (dbValue);
+            const float visualPosition = dbToVisualPos (dbValue);
             meterWidth = juce::roundToInt ((float) totalMeterWidth * visualPosition);
         }
         
