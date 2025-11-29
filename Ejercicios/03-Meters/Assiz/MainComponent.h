@@ -129,7 +129,6 @@ private:
     // MÓDULO: Funciones Helper - Visualización de Medidores
     //==============================================================================
     float rmsToDbFs (float rms) const;  // Convierte valor RMS normalizado (0-1) a dBFS
-    float dbToVisualPos (float db) const;  // Convierte valor dBFS a posición visual (0-1) usando curva exponencial
 
     //==============================================================================
     // MÓDULO: Funciones Helper - Comunicación OSC
