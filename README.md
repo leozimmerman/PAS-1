@@ -4,4 +4,7 @@ Recursos para el seminario de Programación Aplicada al Sonido 1
 
 Cursada 2025
 
-!!!
+
+## Docente
+
+Leonardo Zimmerman | leozimmerman@gmail.com
