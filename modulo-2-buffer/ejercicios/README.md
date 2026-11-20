@@ -15,6 +15,11 @@ en tu propio repositorio de Git, y cambiale el nombre al proyecto:
 - **Projucer:** abrí el `.jucer` y cambiá el *Project Name*.
 - **CMake:** en el `CMakeLists.txt`, reemplazá `AudioFilePlayer` por el nombre de tu app.
 
+El ejemplo ya trae un **`.gitignore`**, para que Git no guarde lo que se genera al compilar (`Builds/`, `build/`...).
+Es un archivo oculto: copiá la carpeta entera, no solo los archivos que ves (en Mac, `Cmd + Shift + .` muestra los ocultos en Finder).
+Fuera de `PAS-1`, CMake ya no encuentra JUCE solo: compilá con `cmake -B build -DJUCE_PATH=/ruta/a/JUCE`
+(ver "Dónde tiene que estar JUCE" en el README del ejemplo). Con Projucer no cambia nada.
+
 El reproductor ya te llena el buffer con muestras. A partir de ahí, lo que hagas en `getNextAudioBlock` es tuyo.
 Los ejemplos 02 a 05 te sirven de referencia. Para probar, hay archivos de audio en [`audiofiles/`](../../audiofiles).
 

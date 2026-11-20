@@ -1,0 +1,22 @@
+# Archivos que Git no tiene que guardar.
+# Este ejemplo ya lo trae para que puedas copiar la carpeta, hacer "git init" adentro
+# y usarla como tu propio repositorio.
+
+# Archivos generados al compilar (Projucer y CMake): se vuelven a generar solos
+Builds/
+JuceLibraryCode/
+build/
+build-*/
+cmake-build-*/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# IDEs: Visual Studio (también "Abrir carpeta" con CMake), VS Code, CLion, Xcode
+.vs/
+out/
+*.user
+.vscode/
+.idea/
+xcuserdata/
