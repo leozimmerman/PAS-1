@@ -26,15 +26,79 @@ Los ejemplos 01, 02 y 05 te sirven de referencia (formas de onda y tablas, la en
 
 ## Dónde va cada cosa
 
-Igual que en el TP 2 (ver la tabla de [`modulo-2-buffer/ejercicios`](../../modulo-2-buffer/ejercicios/README.md#dónde-va-cada-cosa)).
-En el 03 y el 04:
+Igual que en el TP 2, casi todo tu trabajo va en `MainComponent.h` y `MainComponent.cpp`, y `Main.cpp` no hace falta tocarlo.
+Los bloques marcados `==== MIDI ====` reciben las notas: dejalos como están y agregá lo tuyo en el oscilador,
+la envolvente o en funciones nuevas. Lo que no cambia respecto del TP 2 (constructor, `resized`, `paint`, destructor)
+está explicado en la tabla de [`modulo-2-buffer/ejercicios`](../../modulo-2-buffer/ejercicios/README.md#dónde-va-cada-cosa).
 
-| Dónde | Qué va | En los ejemplos |
-|---|---|---|
-| `renderSamples` | El loop muestra por muestra: oscilador, envolvente, modulación. | 03: seno × envolvente × velocity. 05: el LFO |
-| Una función propia para el oscilador | La forma de onda para una fase entre 0 y 1: varias formas, una tabla, formas mezcladas. | 01: `formulaSample` y `tableSample` |
-| `handleMidiMessage` | Qué pasa al apretar y al soltar una tecla: calcular la frecuencia, arrancar o soltar la envolvente. | 03: nota → frecuencia, velocity → amplitud |
-| `MainComponent.h`, constructor y `resized` | Los controles nuevos: igual que en el TP 2 (ver la receta para agregar un slider). | 05: los sliders del LFO |
+| Dónde | Qué va | Hilo | En los ejemplos |
+|---|---|---|---|
+| `MainComponent.h` | Las variables de la clase: los parámetros que mueven los sliders (`std::atomic<float>`), el estado de la voz (fases, etapa y valor de la envolvente, nota actual) y los controles. | | 01: `waveform`, `mode` y las tablas. 02: `attack`...`release` y `Stage`. 05: `lfoRate`, `lfoPhase` |
+| `MainComponent()` (constructor) | Configurar cada control y mostrarlo (con `setupSlider` te ahorrás repetir código). Si calculás tablas de onda, llenalas acá, antes de `setAudioChannels`. | interfaz | 01: `fillTable`. 02 y 03: `setupSlider` |
+| `prepareToPlay` | Guardar el sample rate y poner en cero el estado: las fases de los osciladores y del LFO, la envolvente en `Idle`. | audio | 03: `phase`, `stage` y `midiCollector.reset` |
+| `getNextAudioBlock` | Junta los mensajes MIDI del bloque, los atiende y llama a `renderSamples`. En el 03 y el 04 no hace falta tocarlo: es lo que cambia entre los dos. | audio | 03: atiende todo al principio. 04: corta el bloque en tramos, uno por mensaje |
+| `renderSamples` | **Tu síntesis.** El loop muestra por muestra: oscilador, envolvente, modulación, mezcla, y escribir el resultado en todos los canales. | audio | 03: seno × envolvente × velocity. 05: el LFO (en `getNextAudioBlock`) |
+| Una función propia para el oscilador | La forma de onda para una fase entre 0 y 1: varias formas, una tabla, formas mezcladas. Que solo calcule: la fase la avanza `renderSamples`. | audio | 01: `formulaSample` y `tableSample` |
+| `nextEnvelopeValue` | La envolvente: avanza un paso por muestra y devuelve su valor. Acá cambiás las etapas o las curvas. | audio | 02: el ADSR lineal |
+| `handleMidiMessage` | Qué pasa al apretar y al soltar una tecla: calcular la frecuencia, arrancar o soltar la envolvente. Corre en el hilo de audio, llamada desde `getNextAudioBlock`. | audio | 03: nota → frecuencia, velocity → amplitud |
+| `timerCallback` | Muestra el último mensaje MIDI. Si querés mostrar algo más (la etapa de la envolvente, el LFO), pasalo con un `std::atomic`. | interfaz | 02: la etapa y el valor de la envolvente. 03: el último mensaje |
+| `~MainComponent()` (destructor) | Desconectar el MIDI (`removeMidiInputDeviceCallback`) y `shutdownAudio()`. Ya está hecho. | interfaz | |
+
+**Los dos hilos.** Todo lo que suena (`renderSamples`, `handleMidiMessage`, la envolvente y los osciladores) corre
+en el hilo de audio: sin pedir memoria, sin abrir archivos, sin esperar a nada. Por eso las tablas se llenan
+en el constructor y no al tocar una nota. Los parámetros que vienen de los sliders van en `std::atomic`.
+El estado de la voz (fases, envolvente, nota actual) lo usa solo el audio y puede ser una variable común.
+
+### Receta: agregar un segundo oscilador desafinado
+
+1. **`.h`**: el parámetro, la fase del segundo oscilador y el control.
+   ```cpp
+   std::atomic<float> detune { 10.0f }; // en cents (100 cents = un semitono)
+   float phase2 = 0.0f;                 // solo la usa el hilo de audio
+
+   juce::Slider detuneSlider;
+   juce::Label  detuneLabel { {}, "Detune" };
+   ```
+2. **Constructor**: configurarlo y mostrarlo (con el `setupSlider` del ejemplo).
+   ```cpp
+   setupSlider (detuneSlider, detuneLabel, 0.0, 50.0, detune, " cents");
+   ```
+3. **`prepareToPlay`**: arrancar la fase en cero.
+   ```cpp
+   phase2 = 0.0f;
+   ```
+4. **`resized`**: darle un lugar (si no entra, agrandá la ventana en el `setSize` del constructor).
+   ```cpp
+   auto detuneRow = area.removeFromTop (30);
+   detuneLabel.setBounds (detuneRow.removeFromLeft (100));
+   detuneSlider.setBounds (detuneRow);
+   area.removeFromTop (5);
+   ```
+5. **`renderSamples`**: calcular los dos osciladores y mezclarlos.
+   ```cpp
+   float ratio = std::pow (2.0f, detune / 1200.0f); // cents -> factor de frecuencia (leerlo una vez por tramo)
+
+   for (int i = 0; i < numSamples; ++i)
+   {
+       float osc1 = std::sin (juce::MathConstants<float>::twoPi * phase);
+       float osc2 = std::sin (juce::MathConstants<float>::twoPi * phase2);
+       float sample = 0.5f * (osc1 + osc2);  // la mitad de cada uno, para no pasarse de 1
+
+       sample = sample * nextEnvelopeValue() * velocityGain;
+       // ... escribir en los canales, igual que antes ...
+
+       phase += f / (float) sr;
+       if (phase >= 1.0f)
+           phase -= 1.0f;
+
+       phase2 += f * ratio / (float) sr;
+       if (phase2 >= 1.0f)
+           phase2 -= 1.0f;
+   }
+   ```
+
+Para cualquier otro oscilador o LFO es lo mismo: **una fase propia** en el `.h`, que se pone en cero en `prepareToPlay`
+y se avanza en `renderSamples`, sumando su frecuencia dividida por el sample rate en cada muestra (ejemplos 01 y 05).
 
 ## Reglas
 
